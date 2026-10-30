@@ -22,7 +22,7 @@ This dashboard monitors the **Nifty 50 universe** for 15-minute Opening-Range br
 - **SL (Stop Loss):** Opening-Range Midpoint (`or-mid` = $\\frac{\\text{OR High} + \\text{OR Low}}{2}$)
 - **Target (1R):** 1:1 Risk-to-Reward ratio (`Target = Entry ± Risk`)
 - **Position Size (Qty):** Sized for a fixed **Max Loss of ₹1,000**
-- **Confidence Ratio (0–100%):** Composite score factoring in **Volume Ratio (0-30 pts)**, **RSI (0-20 pts)**, **MACD Momentum (0-20 pts)**, **Breakout Candle Size (0-20 pts)**, and **Volume on Retracement (0-10 pts)**.
+- **Volume Ratio:** Breakout candle volume divided by the **10-period SMA of 5-minute volume** preceding the breakout candle.
 - **Auto-refreshes every 5 minutes.**
 """)
 
@@ -166,10 +166,14 @@ def render_dashboard():
                     pct_moved = "-"
                     confidence = "-"
 
-                    vols = [b["v"] for b in day_bars if b.get("v", 0) > 0]
-                    vol_sma10 = sum(vols[-10:]) / len(vols[-10:]) if len(vols) >= 5 else (sum(vols) / len(vols) if vols else 1)
-                    current_vol = vols[-1] if vols else 0
-                    calc_vol_ratio = round(current_vol / vol_sma10, 2) if vol_sma10 > 0 else 1.0
+                    # Calculate breakout candle volume ratio compared to 10-period SMA of 5-min volume preceding it
+                    calc_vol_ratio = 1.0
+                    for idx, b in enumerate(day_bars[3:], start=3):
+                        if b["c"] > or_high or b["c"] < or_low:
+                            b_vol = b.get("v", 0)
+                            prior_vols = [day_bars[j]["v"] for j in range(max(0, idx - 10), idx) if day_bars[j].get("v", 0) > 0]
+                            sma_vol = sum(prior_vols) / len(prior_vols) if prior_vols else 1.0
+                            calc_vol_ratio = round(b_vol / sma_vol, 2) if sma_vol > 0 else 1.0
 
                     if cmp_val > or_high:
                         triggered = True
