@@ -22,7 +22,8 @@ This dashboard monitors the **Nifty 50 universe** for 15-minute Opening-Range br
 - **SL (Stop Loss):** Opening-Range Midpoint (`or-mid` = $\\frac{\\text{OR High} + \\text{OR Low}}{2}$)
 - **Target (1R):** 1:1 Risk-to-Reward ratio (`Target = Entry ± Risk`)
 - **Position Size (Qty):** Sized for a fixed **Max Loss of ₹1,000**
-- **Volume Ratio:** Breakout candle volume divided by the **10-period SMA of 5-minute volume** preceding the breakout candle.
+- **Volume Ratio:** Breakout candle volume divided by the **10-period SMA of 5-minute volume**.
+- **Confidence (%) (0–100%):** Composite score (Volume Ratio, RSI, MACD, Candle Size, Retracement Volume). **Rows with >= 80% are highlighted in yellow.**
 - **Auto-refreshes every 5 minutes.**
 """)
 
@@ -166,14 +167,22 @@ def render_dashboard():
                     pct_moved = "-"
                     confidence = "-"
 
-                    # Calculate breakout candle volume ratio compared to 10-period SMA of 5-min volume preceding it
+                    # Robust volume SMA and breakout volume calculation
+                    vols = [b.get("v", 0) for b in day_bars]
+                    non_zero_vols = [v for v in vols if v > 0]
+                    vol_sma10 = sum(non_zero_vols[-10:]) / len(non_zero_vols[-10:]) if len(non_zero_vols) >= 3 else (sum(non_zero_vols) / len(non_zero_vols) if non_zero_vols else 1.0)
+                    if vol_sma10 <= 0:
+                        vol_sma10 = 1.0
+
                     calc_vol_ratio = 1.0
                     for idx, b in enumerate(day_bars[3:], start=3):
                         if b["c"] > or_high or b["c"] < or_low:
                             b_vol = b.get("v", 0)
-                            prior_vols = [day_bars[j]["v"] for j in range(max(0, idx - 10), idx) if day_bars[j].get("v", 0) > 0]
-                            sma_vol = sum(prior_vols) / len(prior_vols) if prior_vols else 1.0
-                            calc_vol_ratio = round(b_vol / sma_vol, 2) if sma_vol > 0 else 1.0
+                            if b_vol > 0:
+                                prior_vols = [day_bars[j]["v"] for j in range(max(0, idx - 10), idx) if day_bars[j].get("v", 0) > 0]
+                                sma_p = sum(prior_vols) / len(prior_vols) if prior_vols else vol_sma10
+                                if sma_p > 0:
+                                    calc_vol_ratio = round(b_vol / sma_p, 2)
 
                     if cmp_val > or_high:
                         triggered = True
@@ -228,7 +237,7 @@ def render_dashboard():
                         "OR Low": round(or_low, 2),
                         "% Moved from OR": pct_moved,
                         "Volume Ratio": vol_ratio if triggered else "-",
-                        "Confidence": confidence if triggered else "-"
+                        "Confidence (%)": confidence if triggered else "-"
                     })
                 except Exception:
                     pass
@@ -249,6 +258,19 @@ def render_dashboard():
                         pass
                     return ""
 
+                def highlight_high_confidence(row):
+                    try:
+                        conf = row.get("Confidence (%)", "")
+                        if isinstance(conf, str) and conf.endswith("%"):
+                            val = float(conf.rstrip("%"))
+                        else:
+                            val = float(conf)
+                        if val >= 80:
+                            return ["background-color: #fff9c4; color: #000000; font-weight: bold;" for _ in row]
+                    except:
+                        pass
+                    return ["" for _ in row]
+
                 def style_df(styler):
                     fmt = {
                         "CMP (INR)": lambda x: f"{x:.2f}" if isinstance(x, (int, float)) else x,
@@ -260,12 +282,12 @@ def render_dashboard():
                         "OR Low": lambda x: f"{x:.2f}" if isinstance(x, (int, float)) else x,
                         "% Moved from OR": lambda x: f"{x:.2f}" if isinstance(x, (int, float)) else x,
                         "Volume Ratio": lambda x: f"{x:.2f}" if isinstance(x, (int, float)) else x,
-                        "Confidence": lambda x: f"{x}%" if isinstance(x, (int, float)) else x,
+                        "Confidence (%)": lambda x: f"{x}%" if isinstance(x, (int, float)) else x,
                     }
                     try:
-                        return styler.map(color_pct, subset=["% Change", "% Moved from OR"]).format(fmt, na_rep="-")
+                        return styler.map(color_pct, subset=["% Change", "% Moved from OR"]).format(fmt, na_rep="-").apply(highlight_high_confidence, axis=1)
                     except AttributeError:
-                        return styler.applymap(color_pct, subset=["% Change", "% Moved from OR"]).format(fmt, na_rep="-")
+                        return styler.applymap(color_pct, subset=["% Change", "% Moved from OR"]).format(fmt, na_rep="-").apply(highlight_high_confidence, axis=1)
 
                 st.subheader(f"🚀 Triggered Setups (Breakouts & Breakdowns) [{len(triggered_df)}]")
                 if not triggered_df.empty:
