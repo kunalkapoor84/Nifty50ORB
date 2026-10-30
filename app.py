@@ -12,12 +12,11 @@ st.set_page_config(
 
 st.title("📈 Nifty 50 Live Opening-Range Breakout & Breakdown Dashboard")
 st.markdown("""
-This dashboard monitors the **Nifty 50 universe** for 15-minute Opening-Range breakouts (Long) and breakdowns (Short), backed by **5-minute cached scanning** and **Sector Strength Checkbox Filters**.
+This dashboard monitors the **Nifty 50 universe** for 15-minute Opening-Range breakouts (Long) and breakdowns (Short), backed by **5-minute cached scanning** and an **interactive Sector Strength grid with checkboxes**.
 
 ### 📐 Strategy & Risk Rules:
-- **Performance Caching:** Market data and indicators are cached for 5 minutes to ensure instant UI filtering and zero lag.
-- **Sector Strength Leaderboard:** Ranked daily by average constituent performance (% change).
-- **Sector Checkboxes:** Toggle sectors on/off in the sidebar to filter stocks instantly.
+- **Performance Caching:** Market data and indicators are cached for 5 minutes for instant UI responsiveness.
+- **Sector Strength Leaderboard & Grid:** Ranked daily by average constituent performance (% change). Check/uncheck sectors directly in the grid below to filter stocks instantly.
 - **Anchor Breakout Rule & Validity:** Sustaining **>= OR High** (Longs) or **<= OR Low** (Shorts) keeps setups active; pullbacks back into range reset for fresh breakouts.
 - **Confidence (%) (0–100%):** Composite score. **Rows with >= 80% are highlighted in yellow.**
 """)
@@ -278,7 +277,6 @@ def run_market_scan():
 
     return pd.DataFrame(results)
 
-@st.fragment(run_every="300s")
 def render_dashboard():
     st.sidebar.header("Dashboard Controls")
     auto_refresh = st.sidebar.checkbox("Auto-refresh active (every 5 mins)", value=True)
@@ -299,7 +297,30 @@ def render_dashboard():
         sector_df = sector_df.sort_values(by="Avg % Change", ascending=False).reset_index(drop=True)
         sector_df["Avg % Change"] = sector_df["Avg % Change"].round(2)
 
-        st.subheader("📊 Sector Strength Leaderboard (Daily Strength)")
+        st.subheader("📊 Sector Strength Leaderboard & Filter")
+        
+        # Select All checkbox
+        select_all = st.checkbox("Select All Sectors", value=True, key="select_all_sectors")
+
+        # Prepare editable sector dataframe with checkboxes
+        sector_df["Select"] = select_all
+        
+        # Use st.data_editor to allow interactive checkbox toggling in the grid
+        edited_sector_df = st.data_editor(
+            sector_df[["Select", "Sector", "Avg % Change"]],
+            hide_index=True,
+            use_container_width=True,
+            key="sector_grid_editor"
+        )
+
+        # Get selected sectors from the grid
+        selected_sectors = edited_sector_df[edited_sector_df["Select"] == True]["Sector"].tolist()
+
+        filtered_df = df[df["Sector"].isin(selected_sectors)]
+
+        triggered_df = filtered_df[filtered_df["Status"] == "TRIGGERED"].sort_values(by="Volume Ratio", ascending=False)
+        waiting_df = filtered_df[filtered_df["Status"] == "WAITING"].sort_values(by="% Change", ascending=False)
+
         def color_pct(val):
             try:
                 v = float(val)
@@ -310,28 +331,6 @@ def render_dashboard():
             except:
                 pass
             return ""
-
-        # Format sector table avg change to 2 decimal places with %
-        sector_df_display = sector_df.copy()
-        sector_df_display["Avg % Change"] = sector_df_display["Avg % Change"].apply(lambda x: f"{x:.2f}%")
-
-        st.dataframe(
-            sector_df_display.style.map(color_pct, subset=["Avg % Change"]) if hasattr(pd.DataFrame().style, "map") else sector_df_display.style.applymap(color_pct, subset=["Avg % Change"]),
-            use_container_width=True
-        )
-
-        # Sidebar Sector Checkboxes
-        st.sidebar.subheader("Sector Filter Checkboxes")
-        all_sectors = sorted(df["Sector"].unique().tolist())
-        selected_sectors = []
-        for sector in all_sectors:
-            if st.sidebar.checkbox(sector, value=True, key=f"sec_chk_{sector}"):
-                selected_sectors.append(sector)
-
-        filtered_df = df[df["Sector"].isin(selected_sectors)]
-
-        triggered_df = filtered_df[filtered_df["Status"] == "TRIGGERED"].sort_values(by="Volume Ratio", ascending=False)
-        waiting_df = filtered_df[filtered_df["Status"] == "WAITING"].sort_values(by="% Change", ascending=False)
 
         def highlight_high_confidence(row):
             try:
