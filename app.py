@@ -12,19 +12,19 @@ st.set_page_config(
 
 st.title("📈 Nifty 50 Live Opening-Range Breakout & Breakdown Dashboard")
 st.markdown("""
-This dashboard monitors the **Nifty 50 universe** for 15-minute Opening-Range breakouts (Long) and breakdowns (Short) based on **completed 5-minute candle closes**.
+This dashboard monitors the **Nifty 50 universe** for 15-minute Opening-Range breakouts (Long) and breakdowns (Short).
 
 ### 📐 Strategy & Risk Rules:
-- **Candle Close Rule:** Strictly waits for the 5-minute candle to close before triggering ORB / Breakdown and calculating indicators.
-- **Side:** BUY (Completed Close > OR High) or SELL (Completed Close < OR Low)
+- **Anchor Breakout Rule:** Once a stock triggers on the **first candle close** past OR High/Low (e.g., 09:35), that candle anchors the setup.
+- **Validity:** The setup remains active as long as the price sustains above `OR Low` (for Longs) or below `OR High` (for Shorts).
 - **Entry Model:** 
-  - If % moved from OR $\\le$ 0.3%, **Entry** = Completed Close (Momentum entry).
+  - If % moved from OR $\\le$ 0.3% at breakout, **Entry** = Breakout Close (Momentum entry).
   - If % moved from OR > 0.3%, **Entry** is modeled at **OR High / OR Low** (Retest / Retracement entry).
 - **SL (Stop Loss):** Opening-Range Midpoint (`or-mid` = $\\frac{\\text{OR High} + \\text{OR Low}}{2}$)
 - **Target (1R):** 1:1 Risk-to-Reward ratio (`Target = Entry ± Risk`)
 - **Position Size (Qty):** Sized for a fixed **Max Loss of ₹1,000**
-- **Volume Ratio:** Breakout candle volume divided by the **10-period SMA of 5-minute volume**.
-- **Confidence (%) (0–100%):** Composite score factoring in **Volume Ratio (30 pts)**, **RSI (20 pts)**, **MACD (20 pts)**, **Breakout Candle Size (20 pts)**, and **Pullback Volume (10 pts)**. **Rows with >= 80% are highlighted in yellow.**
+- **Volume Ratio:** Exact volume of the **initial breakout candle** divided by the **10-period SMA of 5-minute volume** preceding it.
+- **Confidence (%) (0–100%):** Composite score. **Rows with >= 80% are highlighted in yellow.**
 - **Auto-refreshes every 5 minutes.**
 """)
 
@@ -133,7 +133,7 @@ def render_dashboard():
 
     st.write(f"**Last Updated:** {nse_data.now_ist().strftime('%Y-%m-%d %H:%M:%S')} IST")
 
-    with st.spinner("Scanning Nifty 50 stocks on completed 5-min candle closes..."):
+    with st.spinner("Scanning Nifty 50 stocks on anchor breakout candles..."):
         try:
             symbols = nse_data.index_constituents("NIFTY50")
             results = []
@@ -148,7 +148,6 @@ def render_dashboard():
                     if len(day_bars) < 3:
                         continue
                     
-                    # Restrict to completed 5-minute bars (bar close time <= now)
                     completed_bars = [b for b in day_bars if nse_data.bar_close(b) <= now]
                     if not completed_bars:
                         completed_bars = day_bars
@@ -162,8 +161,6 @@ def render_dashboard():
                     or_low = min(b["l"] for b in or_bars)
                     or_mid = round((or_high + or_low) / 2, 2)
                     
-                    rsi_val, macd_hist, prev_hist = calculate_indicators(completed_bars)
-
                     triggered = False
                     side = "WAITING"
                     entry = "-"
@@ -175,58 +172,81 @@ def render_dashboard():
                     pct_moved = "-"
                     confidence = "-"
 
-                    vols = [b.get("v", 0) for b in completed_bars]
-                    non_zero_vols = [v for v in vols if v > 0]
-                    vol_sma10 = sum(non_zero_vols[-10:]) / len(non_zero_vols[-10:]) if len(non_zero_vols) >= 3 else (sum(non_zero_vols) / len(non_zero_vols) if non_zero_vols else 1.0)
-                    if vol_sma10 <= 0:
-                        vol_sma10 = 1.0
-
-                    calc_vol_ratio = 1.0
+                    # Find the FIRST (anchor) breakout bar after the opening range
+                    anchor_breakout_bar = None
+                    anchor_idx = -1
                     for idx, b in enumerate(completed_bars[3:], start=3):
-                        if b["c"] > or_high or b["c"] < or_low:
-                            b_vol = b.get("v", 0)
+                        if b["c"] > or_high:
+                            anchor_breakout_bar = b
+                            anchor_idx = idx
+                            break_side = "BUY (Long)"
+                            break
+                        elif b["c"] < or_low:
+                            anchor_breakout_bar = b
+                            anchor_idx = idx
+                            break_side = "SELL (Short)"
+                            break
+
+                    if anchor_breakout_bar is not None:
+                        # Check validity: Long must stay above or_low; Short must stay below or_high
+                        if break_side == "BUY (Long)" and cmp_val >= or_low:
+                            triggered = True
+                            side = "BUY (Long)"
+                            breakout_close = anchor_breakout_bar["c"]
+                            pct_moved = round(((cmp_val - or_high) / or_high) * 100, 2)
+                            
+                            if pct_moved > 0.3:
+                                entry = round(or_high, 2)
+                            else:
+                                entry = round(breakout_close, 2)
+                                
+                            sl = or_mid
+                            risk = entry - sl
+                            target = round(entry + risk, 2)
+                            qty = max(1, int(1000 / risk)) if risk > 0 else 1
+                            max_loss = 1000
+
+                            # Volume ratio of the anchor breakout candle vs prior 10-bar SMA
+                            vols = [b.get("v", 0) for b in completed_bars]
+                            non_zero_vols = [v for v in vols if v > 0]
+                            b_vol = anchor_breakout_bar.get("v", 0)
                             if b_vol <= 0 and non_zero_vols:
                                 b_vol = non_zero_vols[-1]
-                            prior_vols = [completed_bars[j]["v"] for j in range(max(0, idx - 10), idx) if completed_bars[j].get("v", 0) > 0]
-                            sma_p = sum(prior_vols) / len(prior_vols) if prior_vols else vol_sma10
-                            if sma_p > 0:
-                                calc_vol_ratio = round(b_vol / sma_p, 2)
+                            prior_vols = [completed_bars[j]["v"] for j in range(max(0, anchor_idx - 10), anchor_idx) if completed_bars[j].get("v", 0) > 0]
+                            sma_vol = sum(prior_vols) / len(prior_vols) if prior_vols else (sum(non_zero_vols) / len(non_zero_vols) if non_zero_vols else 1.0)
+                            vol_ratio = round(b_vol / sma_vol, 2) if sma_vol > 0 else 1.0
 
-                    if cmp_val > or_high:
-                        triggered = True
-                        side = "BUY (Long)"
-                        pct_moved = round(((cmp_val - or_high) / or_high) * 100, 2)
-                        
-                        if pct_moved > 0.3:
-                            entry = round(or_high, 2)
-                        else:
-                            entry = round(cmp_val, 2)
-                            
-                        sl = or_mid
-                        risk = entry - sl
-                        target = round(entry + risk, 2)
-                        qty = max(1, int(1000 / risk)) if risk > 0 else 1
-                        max_loss = 1000
-                        vol_ratio = calc_vol_ratio
-                        confidence = compute_confidence(side, vol_ratio, rsi_val, macd_hist, prev_hist, completed_bars, cmp_val)
+                            rsi_val, macd_hist, prev_hist = calculate_indicators(completed_bars[:anchor_idx+1])
+                            confidence = compute_confidence(side, vol_ratio, rsi_val, macd_hist, prev_hist, completed_bars[:anchor_idx+1], cmp_val)
 
-                    elif cmp_val < or_low:
-                        triggered = True
-                        side = "SELL (Short)"
-                        pct_moved = round(((or_low - cmp_val) / or_low) * 100, 2)
-                        
-                        if pct_moved > 0.3:
-                            entry = round(or_low, 2)
-                        else:
-                            entry = round(cmp_val, 2)
+                        elif break_side == "SELL (Short)" and cmp_val <= or_high:
+                            triggered = True
+                            side = "SELL (Short)"
+                            breakout_close = anchor_breakout_bar["c"]
+                            pct_moved = round(((or_low - breakout_close) / or_low) * 100, 2)
                             
-                        sl = or_mid
-                        risk = sl - entry
-                        target = round(entry - risk, 2)
-                        qty = max(1, int(1000 / risk)) if risk > 0 else 1
-                        max_loss = 1000
-                        vol_ratio = calc_vol_ratio
-                        confidence = compute_confidence(side, vol_ratio, rsi_val, macd_hist, prev_hist, completed_bars, cmp_val)
+                            if pct_moved > 0.3:
+                                entry = round(or_low, 2)
+                            else:
+                                entry = round(breakout_close, 2)
+                                
+                            sl = or_mid
+                            risk = sl - entry
+                            target = round(entry - risk, 2)
+                            qty = max(1, int(1000 / risk)) if risk > 0 else 1
+                            max_loss = 1000
+
+                            vols = [b.get("v", 0) for b in completed_bars]
+                            non_zero_vols = [v for v in vols if v > 0]
+                            b_vol = anchor_breakout_bar.get("v", 0)
+                            if b_vol <= 0 and non_zero_vols:
+                                b_vol = non_zero_vols[-1]
+                            prior_vols = [completed_bars[j]["v"] for j in range(max(0, anchor_idx - 10), anchor_idx) if completed_bars[j].get("v", 0) > 0]
+                            sma_vol = sum(prior_vols) / len(prior_vols) if prior_vols else (sum(non_zero_vols) / len(non_zero_vols) if non_zero_vols else 1.0)
+                            vol_ratio = round(b_vol / sma_vol, 2) if sma_vol > 0 else 1.0
+
+                            rsi_val, macd_hist, prev_hist = calculate_indicators(completed_bars[:anchor_idx+1])
+                            confidence = compute_confidence(side, vol_ratio, rsi_val, macd_hist, prev_hist, completed_bars[:anchor_idx+1], cmp_val)
 
                     status = "TRIGGERED" if triggered else "WAITING"
 
