@@ -1,0 +1,274 @@
+{
+  "mode": "orb",
+  "market": "NSE",
+  "currency": "INR",
+  "as_of": "2026-10-30 15:00 IST",
+  "date": "2026-10-30",
+  "or_minutes": 15,
+  "universe": 50,
+  "scanned": 50,
+  "failed": 0,
+  "hits": [
+    {
+      "symbol": "HCLTECH.NS",
+      "setups": [
+        "orb"
+      ],
+      "at": "09:35",
+      "price": 1428.5,
+      "or_low": 1415.6,
+      "or_high": 1427.4,
+      "pct_over": 0.08,
+      "volume_ratio": 5.15,
+      "or_minutes": 15
+    },
+    {
+      "symbol": "INDIGO.NS",
+      "setups": [
+        "orb"
+      ],
+      "at": "09:35",
+      "price": 4788.8,
+      "or_low": 4638.0,
+      "or_high": 4766.7,
+      "pct_over": 0.46,
+      "volume_ratio": 1.58,
+      "or_minutes": 15
+    },
+    {
+      "symbol": "BAJFINANCE.NS",
+      "setups": [
+        "orb"
+      ],
+      "at": "09:35",
+      "price": 940.5,
+      "or_low": 932.05,
+      "or_high": 937.7,
+      "pct_over": 0.3,
+      "volume_ratio": 1.46,
+      "or_minutes": 15
+    },
+    {
+      "symbol": "JSWSTEEL.NS",
+      "setups": [
+        "orb"
+      ],
+      "at": "09:35",
+      "price": 1255.7,
+      "or_low": 1247.2,
+      "or_high": 1253.8,
+      "pct_over": 0.15,
+      "volume_ratio": 1.24,
+      "or_minutes": 15
+    },
+    {
+      "symbol": "ICICIBANK.NS",
+      "setups": [
+        "orb"
+      ],
+      "at": "09:35",
+      "price": 1394.5,
+      "or_low": 1383.4,
+      "or_high": 1390.9,
+      "pct_over": 0.26,
+      "volume_ratio": 0.9,
+      "or_minutes": 15
+    },
+    {
+      "symbol": "APOLLOHOSP.NS",
+      "setups": [
+        "orb"
+      ],
+      "at": "09:40",
+      "price": 8282.5,
+      "or_low": 8181.5,
+      "or_high": 8250.0,
+      "pct_over": 0.39,
+      "volume_ratio": 2.54,
+      "or_minutes": 15
+    },
+    {
+      "symbol": "ETERNAL.NS",
+      "setups": [
+        "orb"
+      ],
+      "at": "09:40",
+      "price": 342.3,
+      "or_low": 335.3,
+      "or_high": 341.7,
+      "pct_over": 0.18,
+      "volume_ratio": 0.52,
+      "or_minutes": 15
+    },
+    {
+      "symbol": "BAJAJ-AUTO.NS",
+      "setups": [
+        "orb"
+      ],
+      "at": "09:45",
+      "price": 10402.0,
+      "or_low": 10314.0,
+      "or_high": 10386.0,
+      "pct_over": 0.15,
+      "volume_ratio": 1.06,
+      "or_minutes": 15
+    },
+    {
+      "symbol": "SBILIFE.NS",
+      "setups": [
+        "orb"
+      ],
+      "at": "09:45",
+      "price": 1657.3,
+      "or_low": 1647.9,
+      "or_high": 1655.7,
+      "pct_over": 0.1,
+      "volume_ratio": 1.05,
+      "or_minutes": 15
+    },
+    {
+      "symbol": "TECHM.NS",
+      "setups": [
+        "orb"
+      ],
+      "at": "10:20",
+      "price": 1804.7,
+      "or_low": 1782.6,
+      "or_high": 1799.8,
+      "pct_over": 0.27,
+      "volume_ratio": 1.42,
+      "or_minutes": 15
+    },
+    {
+      "symbol": "POWERGRID.NS",
+      "setups": [
+        "orb"
+      ],
+      "at": "10:40",
+      "price": 264.65,
+      "or_low": 260.05,
+      "or_high": 263.5,
+      "pct_over": 0.44,
+      "volume_ratio": 2.39,
+      "or_minutes": 15
+    },
+    {
+      "symbol": "HINDALCO.NS",
+      "setups": [
+        "orb"
+      ],
+      "at": "10:55",
+      "price": 882.6,
+      "or_low": 878.3,
+      "or_high": 881.85,
+      "pct_over": 0.09,
+      "volume_ratio": 0.76,
+      "or_minutes": 15
+    },
+    {
+      "symbol": "NTPC.NS",
+      "setups": [
+        "orb"
+      ],
+      "at": "11:05",
+      "price": 315.0,
+      "or_low": 309.9,
+      "or_high": 314.1,
+      "pct_over": 0.29,
+      "volume_ratio": 4.43,
+      "or_minutes": 15
+    },
+    {
+      "symbol": "GRASIM.NS",
+      "setups": [
+        "orb"
+      ],
+      "at": "11:05",
+      "price": 2934.6,
+      "or_low": 2909.6,
+      "or_high": 2927.1,
+      "pct_over": 0.26,
+      "volume_ratio": 4.26,
+      "or_minutes": 15
+    },
+    {
+      "symbol": "INFY.NS",
+      "setups": [
+        "orb"
+      ],
+      "at": "11:05",
+      "price": 1170.85,
+      "or_low": 1149.0,
+      "or_high": 1169.6,
+      "pct_over": 0.11,
+      "volume_ratio": 0.5,
+      "or_minutes": 15
+    },
+    {
+      "symbol": "HDFCBANK.NS",
+      "setups": [
+        "orb"
+      ],
+      "at": "11:15",
+      "price": 687.65,
+      "or_low": 683.05,
+      "or_high": 686.05,
+      "pct_over": 0.23,
+      "volume_ratio": 0.82,
+      "or_minutes": 15
+    },
+    {
+      "symbol": "LT.NS",
+      "setups": [
+        "orb"
+      ],
+      "at": "11:30",
+      "price": 3844.5,
+      "or_low": 3821.2,
+      "or_high": 3840.5,
+      "pct_over": 0.1,
+      "volume_ratio": 1.22,
+      "or_minutes": 15
+    },
+    {
+      "symbol": "MAXHEALTH.NS",
+      "setups": [
+        "orb"
+      ],
+      "at": "11:30",
+      "price": 860.7,
+      "or_low": 852.55,
+      "or_high": 859.0,
+      "pct_over": 0.2,
+      "volume_ratio": 0.79,
+      "or_minutes": 15
+    },
+    {
+      "symbol": "TATASTEEL.NS",
+      "setups": [
+        "orb"
+      ],
+      "at": "11:30",
+      "price": 168.6,
+      "or_low": 167.41,
+      "or_high": 168.51,
+      "pct_over": 0.05,
+      "volume_ratio": 0.26,
+      "or_minutes": 15
+    },
+    {
+      "symbol": "DRREDDY.NS",
+      "setups": [
+        "orb"
+      ],
+      "at": "11:35",
+      "price": 1357.9,
+      "or_low": 1345.7,
+      "or_high": 1355.6,
+      "pct_over": 0.17,
+      "volume_ratio": 3.15,
+      "or_minutes": 15
+    }
+  ],
+  "data_source": "yahoo"
+}

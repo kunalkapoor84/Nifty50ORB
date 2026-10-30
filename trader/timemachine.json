@@ -1,0 +1,27 @@
+{
+  "symbol": "TECHM.NS",
+  "date": "2026-10-30",
+  "entry": 1804.7,
+  "stop": 1791.2,
+  "target": 1818.2,
+  "target_r": 1.0,
+  "entry_time": "10:20",
+  "replays": 10000,
+  "seed": 19,
+  "window": 2,
+  "window_sessions": 59,
+  "window_from": "2026-08-05",
+  "window_to": "2026-10-29",
+  "target_first_pct": 30.7,
+  "stop_first_pct": 56.0,
+  "open_pct": 13.3,
+  "median_r": -1.0,
+  "verdict": "stop-first in this window",
+  "history": {
+    "trades": 30,
+    "target": 11,
+    "stop": 12,
+    "open": 7,
+    "rule": "or-mid"
+  }
+}

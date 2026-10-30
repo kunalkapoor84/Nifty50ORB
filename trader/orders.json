@@ -1,0 +1,38 @@
+{
+  "orders": [
+    {
+      "symbol": "TECHM.NS",
+      "side": "buy",
+      "qty": 49,
+      "type": "limit",
+      "limit_price": 1804.7,
+      "time_in_force": "day",
+      "order_class": "bracket",
+      "take_profit": {
+        "limit_price": 1818.2
+      },
+      "stop_loss": {
+        "stop_price": 1791.2
+      }
+    }
+  ],
+  "sizing": {
+    "market": "NSE",
+    "currency": "INR",
+    "symbol": "TECHM.NS",
+    "qty": 49,
+    "lot_size": 1.0,
+    "price": 1804.7,
+    "entry": 1804.7,
+    "stop": 1791.2,
+    "target": 1818.2,
+    "risk_per_share": 13.5,
+    "max_loss": 1000.0,
+    "risk_at_stop": 661.5,
+    "notional": 88430.3,
+    "cash_available": 90000.0,
+    "pct_of_budget": 88.43,
+    "plan_date": "2026-10-30",
+    "flat_by": "15:15"
+  }
+}

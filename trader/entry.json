@@ -1,0 +1,17 @@
+{
+  "symbol": "TECHM.NS",
+  "market": "NSE",
+  "setup": "orb",
+  "date": "2026-10-30",
+  "status": "triggered",
+  "reason": "first 5-minute close above Rs 1,799.80",
+  "checked_at": "2026-10-30 11:33",
+  "entry": 1804.7,
+  "time": "10:20",
+  "bar": 12,
+  "opening_range": {
+    "minutes": 15,
+    "high": 1799.8,
+    "low": 1782.6
+  }
+}

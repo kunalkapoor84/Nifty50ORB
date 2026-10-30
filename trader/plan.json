@@ -1,0 +1,28 @@
+{
+  "symbol": "TECHM.NS",
+  "market": "NSE",
+  "currency": "INR",
+  "timezone": "Asia/Kolkata",
+  "side": "buy",
+  "setup": "orb",
+  "date": "2026-10-30",
+  "entry": 1804.7,
+  "entry_time": "10:20",
+  "entry_bar": 12,
+  "interval": "5m",
+  "stop": 1791.2,
+  "stop_rule": "or-mid",
+  "target": 1818.2,
+  "target_r": 1.0,
+  "risk_per_share": 13.5,
+  "reward_risk": 1.0,
+  "flat_by": "15:15",
+  "opening_range": {
+    "minutes": 15,
+    "high": 1799.8,
+    "low": 1782.6
+  },
+  "tick_size": 0.05,
+  "data_source": "yahoo",
+  "created_at": "2026-10-30T11:33:10"
+}
