@@ -57,7 +57,7 @@ def render_dashboard():
                     or_low = min(b["l"] for b in or_bars)
                     or_mid = round((or_high + or_low) / 2, 2)
                     
-                    # Check for trigger after opening range (bar index >= 3)
+                    # Evaluate latest state across all intraday bars after OR
                     triggered = False
                     side = "WAITING"
                     entry = "-"
@@ -83,7 +83,6 @@ def render_dashboard():
                             avg = sum(base) / len(base) if base else 1
                             vol_ratio = round(b["v"] / avg, 2) if avg else 1.0
                             pct_moved = round(((entry - or_high) / or_high) * 100, 2)
-                            break
                         # Short Breakdown
                         elif b["c"] < or_low:
                             triggered = True
@@ -98,7 +97,6 @@ def render_dashboard():
                             avg = sum(base) / len(base) if base else 1
                             vol_ratio = round(b["v"] / avg, 2) if avg else 1.0
                             pct_moved = round(((or_low - entry) / or_low) * 100, 2)
-                            break
 
                     status = "TRIGGERED" if triggered else "WAITING"
 
@@ -139,15 +137,15 @@ def render_dashboard():
 
                 def style_df(styler):
                     fmt = {
-                        "CMP (INR)": "{:.2f}",
-                        "% Change": "{:.2f}",
-                        "Entry (INR)": "{:.2f}",
-                        "SL (INR)": "{:.2f}",
-                        "Target (INR)": "{:.2f}",
-                        "OR High": "{:.2f}",
-                        "OR Low": "{:.2f}",
-                        "% Moved from OR": "{:.2f}",
-                        "Volume Ratio": "{:.2f}",
+                        "CMP (INR)": lambda x: f"{x:.2f}" if isinstance(x, (int, float)) else x,
+                        "% Change": lambda x: f"{x:.2f}" if isinstance(x, (int, float)) else x,
+                        "Entry (INR)": lambda x: f"{x:.2f}" if isinstance(x, (int, float)) else x,
+                        "SL (INR)": lambda x: f"{x:.2f}" if isinstance(x, (int, float)) else x,
+                        "Target (INR)": lambda x: f"{x:.2f}" if isinstance(x, (int, float)) else x,
+                        "OR High": lambda x: f"{x:.2f}" if isinstance(x, (int, float)) else x,
+                        "OR Low": lambda x: f"{x:.2f}" if isinstance(x, (int, float)) else x,
+                        "% Moved from OR": lambda x: f"{x:.2f}" if isinstance(x, (int, float)) else x,
+                        "Volume Ratio": lambda x: f"{x:.2f}" if isinstance(x, (int, float)) else x,
                     }
                     try:
                         return styler.map(color_pct, subset=["% Change", "% Moved from OR"]).format(fmt, na_rep="-")
