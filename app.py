@@ -22,6 +22,7 @@ This dashboard monitors the **Nifty 50 universe** for 15-minute Opening-Range br
 - **SL (Stop Loss):** Opening-Range Midpoint (`or-mid` = $\\frac{\\text{OR High} + \\text{OR Low}}{2}$)
 - **Target (1R):** 1:1 Risk-to-Reward ratio (`Target = Entry ± Risk`)
 - **Position Size (Qty):** Sized for a fixed **Max Loss of ₹1,000**
+- **Volume Ratio:** Latest 5-minute candle volume compared against the **10-period SMA of 5-minute volume**.
 - **Auto-refreshes every 5 minutes.**
 """)
 
@@ -67,17 +68,17 @@ def render_dashboard():
                     vol_ratio = "-"
                     pct_moved = "-"
 
-                    base = [x["v"] for x in or_bars if x["v"]]
-                    avg_vol = sum(base) / len(base) if base else 1
-                    current_vol = day_bars[-1]["v"] if "v" in day_bars[-1] else 0
-                    calc_vol_ratio = round(current_vol / avg_vol, 2) if avg_vol > 0 else 1.0
+                    # 10-period SMA of 5-minute volume
+                    vols = [b["v"] for b in day_bars if b.get("v", 0) > 0]
+                    vol_sma10 = sum(vols[-10:]) / len(vols[-10:]) if len(vols) >= 5 else (sum(vols) / len(vols) if vols else 1)
+                    current_vol = day_bars[-1].get("v", 0)
+                    calc_vol_ratio = round(current_vol / vol_sma10, 2) if vol_sma10 > 0 else 1.0
 
                     if cmp_val > or_high:
                         triggered = True
                         side = "BUY (Long)"
                         pct_moved = round(((cmp_val - or_high) / or_high) * 100, 2)
                         
-                        # Retracement entry rule: if moved > 0.3%, set entry at OR High; else CMP
                         if pct_moved > 0.3:
                             entry = round(or_high, 2)
                         else:
@@ -95,7 +96,6 @@ def render_dashboard():
                         side = "SELL (Short)"
                         pct_moved = round(((or_low - cmp_val) / or_low) * 100, 2)
                         
-                        # Retracement entry rule: if moved > 0.3%, set entry at OR Low; else CMP
                         if pct_moved > 0.3:
                             entry = round(or_low, 2)
                         else:
@@ -124,7 +124,7 @@ def render_dashboard():
                         "OR High": round(or_high, 2),
                         "OR Low": round(or_low, 2),
                         "% Moved from OR": pct_moved,
-                        "Volume Ratio": vol_ratio
+                        "Volume Ratio": vol_ratio if triggered else "-"
                     })
                 except Exception:
                     pass
@@ -183,7 +183,7 @@ def render_dashboard():
                     label="Download Full Scan CSV",
                     data=csv,
                     file_name=f"nifty50_orb_breakdown_scan_{nse_data.now_ist().strftime('%Y%m%d_%H%M')}.csv",
-                    mime="text/css"
+                    mime="text/csv"
                 )
             else:
                 st.warning("No data retrieved from Yahoo Finance.")
