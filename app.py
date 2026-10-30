@@ -12,16 +12,16 @@ st.set_page_config(
 
 st.title("📈 Nifty 50 Live Opening-Range Breakout & Breakdown Dashboard")
 st.markdown("""
-This dashboard monitors the **Nifty 50 universe** for 15-minute Opening-Range breakouts (Long) and breakdowns (Short).
+This dashboard monitors the **Nifty 50 universe** for 15-minute Opening-Range breakouts (Long) and breakdowns (Short) based on current live price action.
 
 ### 📐 Strategy & Risk Rules:
-- **Side:** BUY (Breakout > OR High) or SELL (Breakdown < OR Low)
+- **Side:** BUY (CMP > OR High) or SELL (CMP < OR Low)
 - **SL (Stop Loss):** Opening-Range Midpoint (`or-mid` = $\\frac{\\text{OR High} + \\text{OR Low}}{2}$)
 - **Target (1R):** 1:1 Risk-to-Reward ratio:
   - *Long:* $\\text{Target} = \\text{Entry} + (\\text{Entry} - \\text{SL})$
   - *Short:* $\\text{Target} = \\text{Entry} - (\\text{SL} - \\text{Entry})$
 - **Position Size (Qty):** Sized for a fixed **Max Loss of ₹1,000** ($\\text{Qty} = \\frac{1000}{|\\text{Entry} - \\text{SL}|}$)
-- **% Moved from OR:** Percentage distance moved past OR High (for breakouts) or OR Low (for breakdowns).
+- **% Moved from OR:** Live percentage distance of CMP past OR High (for breakouts) or OR Low (for breakdowns).
 - **Auto-refreshes every 5 minutes.**
 """)
 
@@ -57,7 +57,7 @@ def render_dashboard():
                     or_low = min(b["l"] for b in or_bars)
                     or_mid = round((or_high + or_low) / 2, 2)
                     
-                    # Evaluate latest state across all intraday bars after OR
+                    # Evaluate live state based on current CMP vs Opening Range
                     triggered = False
                     side = "WAITING"
                     entry = "-"
@@ -68,35 +68,34 @@ def render_dashboard():
                     vol_ratio = "-"
                     pct_moved = "-"
 
-                    for b in day_bars[3:]:
-                        # Long Breakout
-                        if b["c"] > or_high:
-                            triggered = True
-                            side = "BUY (Long)"
-                            entry = round(b["c"], 2)
-                            sl = or_mid
-                            risk = entry - sl
-                            target = round(entry + risk, 2)
-                            qty = max(1, int(1000 / risk)) if risk > 0 else 1
-                            max_loss = 1000
-                            base = [x["v"] for x in or_bars if x["v"]]
-                            avg = sum(base) / len(base) if base else 1
-                            vol_ratio = round(b["v"] / avg, 2) if avg else 1.0
-                            pct_moved = round(((entry - or_high) / or_high) * 100, 2)
-                        # Short Breakdown
-                        elif b["c"] < or_low:
-                            triggered = True
-                            side = "SELL (Short)"
-                            entry = round(b["c"], 2)
-                            sl = or_mid
-                            risk = sl - entry
-                            target = round(entry - risk, 2)
-                            qty = max(1, int(1000 / risk)) if risk > 0 else 1
-                            max_loss = 1000
-                            base = [x["v"] for x in or_bars if x["v"]]
-                            avg = sum(base) / len(base) if base else 1
-                            vol_ratio = round(b["v"] / avg, 2) if avg else 1.0
-                            pct_moved = round(((or_low - entry) / or_low) * 100, 2)
+                    # Check if volume data is available
+                    base = [x["v"] for x in or_bars if x["v"]]
+                    avg_vol = sum(base) / len(base) if base else 1
+                    current_vol = day_bars[-1]["v"] if "v" in day_bars[-1] else 0
+                    calc_vol_ratio = round(current_vol / avg_vol, 2) if avg_vol > 0 else 1.0
+
+                    if cmp_val > or_high:
+                        triggered = True
+                        side = "BUY (Long)"
+                        entry = round(cmp_val, 2)
+                        sl = or_mid
+                        risk = entry - sl
+                        target = round(entry + risk, 2)
+                        qty = max(1, int(1000 / risk)) if risk > 0 else 1
+                        max_loss = 1000
+                        vol_ratio = calc_vol_ratio
+                        pct_moved = round(((cmp_val - or_high) / or_high) * 100, 2)
+                    elif cmp_val < or_low:
+                        triggered = True
+                        side = "SELL (Short)"
+                        entry = round(cmp_val, 2)
+                        sl = or_mid
+                        risk = sl - entry
+                        target = round(entry - risk, 2)
+                        qty = max(1, int(1000 / risk)) if risk > 0 else 1
+                        max_loss = 1000
+                        vol_ratio = calc_vol_ratio
+                        pct_moved = round(((or_low - cmp_val) / or_low) * 100, 2)
 
                     status = "TRIGGERED" if triggered else "WAITING"
 
@@ -159,7 +158,7 @@ def render_dashboard():
                         use_container_width=True
                     )
                 else:
-                    st.info("No breakouts or breakdowns triggered yet.")
+                    st.info("No active breakouts or breakdowns at current CMP.")
 
                 st.subheader(f"⏳ Waiting / Scanning [{len(waiting_df)}]")
                 st.dataframe(
