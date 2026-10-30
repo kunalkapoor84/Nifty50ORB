@@ -2,10 +2,6 @@ import streamlit as st
 import pandas as pd
 import time
 import os
-import sys
-
-# Add trader-nse skill path to sys.path
-sys.path.insert(0, os.path.expanduser(r"C:\Users\Pc\.agents\skills\trader-nse"))
 import nse_data
 
 st.set_page_config(
