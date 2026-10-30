@@ -21,7 +21,7 @@ This dashboard monitors the **Nifty 50 universe** for 15-minute Opening-Range br
   - *Long:* $\\text{Target} = \\text{Entry} + (\\text{Entry} - \\text{SL})$
   - *Short:* $\\text{Target} = \\text{Entry} - (\\text{SL} - \\text{Entry})$
 - **Position Size (Qty):** Sized for a fixed **Max Loss of ₹1,000** ($\\text{Qty} = \\frac{1000}{|\\text{Entry} - \\text{SL}|}$)
-- **% Change:** Intraday percentage change from the market open.
+- **% Moved from OR:** Percentage distance moved past OR High (for breakouts) or OR Low (for breakdowns).
 - **Auto-refreshes every 5 minutes.**
 """)
 
@@ -60,12 +60,13 @@ def render_dashboard():
                     # Check for trigger after opening range (bar index >= 3)
                     triggered = False
                     side = "WAITING"
-                    entry = round(cmp_val, 2)
-                    sl = or_mid
-                    target = 0.0
+                    entry = "-"
+                    sl = "-"
+                    target = "-"
                     qty = "-"
                     max_loss = "-"
                     vol_ratio = "-"
+                    pct_moved = "-"
 
                     for b in day_bars[3:]:
                         # Long Breakout
@@ -81,6 +82,7 @@ def render_dashboard():
                             base = [x["v"] for x in or_bars if x["v"]]
                             avg = sum(base) / len(base) if base else 1
                             vol_ratio = round(b["v"] / avg, 2) if avg else 1.0
+                            pct_moved = round(((entry - or_high) / or_high) * 100, 2)
                             break
                         # Short Breakdown
                         elif b["c"] < or_low:
@@ -95,6 +97,7 @@ def render_dashboard():
                             base = [x["v"] for x in or_bars if x["v"]]
                             avg = sum(base) / len(base) if base else 1
                             vol_ratio = round(b["v"] / avg, 2) if avg else 1.0
+                            pct_moved = round(((or_low - entry) / or_low) * 100, 2)
                             break
 
                     status = "TRIGGERED" if triggered else "WAITING"
@@ -107,11 +110,12 @@ def render_dashboard():
                         "% Change": pct_chg,
                         "Entry (INR)": entry,
                         "SL (INR)": sl,
-                        "Target (INR)": target if triggered else "-",
+                        "Target (INR)": target,
                         "Qty": qty,
                         "Max Loss (INR)": max_loss,
                         "OR High": round(or_high, 2),
                         "OR Low": round(or_low, 2),
+                        "% Moved from OR": pct_moved,
                         "Volume Ratio": vol_ratio
                     })
                 except Exception:
@@ -135,9 +139,9 @@ def render_dashboard():
 
                 def style_df(styler):
                     try:
-                        return styler.map(color_pct, subset=["% Change"])
+                        return styler.map(color_pct, subset=["% Change", "% Moved from OR"])
                     except AttributeError:
-                        return styler.applymap(color_pct, subset=["% Change"])
+                        return styler.applymap(color_pct, subset=["% Change", "% Moved from OR"])
 
                 st.subheader(f"🚀 Triggered Setups (Breakouts & Breakdowns) [{len(triggered_df)}]")
                 if not triggered_df.empty:
