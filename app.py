@@ -105,10 +105,10 @@ def render_dashboard():
 
             df = pd.DataFrame(results)
             if not df.empty:
-                triggered_df = df[df["Status"] == "TRIGGERED"].sort_values(by="Symbol")
+                triggered_df = df[df["Status"] == "TRIGGERED"].sort_values(by="Volume Ratio", ascending=False)
                 waiting_df = df[df["Status"] == "WAITING"]
 
-                st.subheader(f"🚀 Triggered Setups (Breakouts & Breakdowns) [{len(triggered_df)}]亲自")
+                st.subheader(f"🚀 Triggered Setups (Breakouts & Breakdowns) [{len(triggered_df)}]")
                 if not triggered_df.empty:
                     st.dataframe(triggered_df, use_container_width=True)
                 else:
