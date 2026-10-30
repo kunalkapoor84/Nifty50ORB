@@ -12,21 +12,41 @@ st.set_page_config(
 
 st.title("📈 Nifty 50 Live Opening-Range Breakout & Breakdown Dashboard")
 st.markdown("""
-This dashboard monitors the **Nifty 50 universe** for 15-minute Opening-Range breakouts (Long) and breakdowns (Short).
+This dashboard monitors the **Nifty 50 universe** for 15-minute Opening-Range breakouts (Long) and breakdowns (Short), complete with **Sector Strength Rankings** and **Sector Filters**.
 
 ### 📐 Strategy & Risk Rules:
-- **Anchor Breakout Rule:** Once a stock triggers on the **first candle close** past OR High/Low (e.g., 09:35), that candle anchors the setup.
-- **Validity:** The setup remains active as long as the price sustains above `OR Low` (for Longs) or below `OR High` (for Shorts).
+- **Sector Analysis:** Sectors are automatically ranked by daily strength (% change) based on constituent performance.
+- **Fresh Breakout Rule:** If price pulls back inside the Opening Range (`<= OR High` for longs or `>= OR Low` for shorts), the previous setup is cleared and watches for a **fresh breakout or breakdown**.
+- **Setup Validity (Active Flow):** 
+  - *Longs:* Must sustain **>= OR High** to remain active in the Triggered list.
+  - *Shorts:* Must sustain **<= OR Low** to remain active in the Triggered list.
 - **Entry Model:** 
-  - If % moved from OR $\\le$ 0.3% at breakout, **Entry** = Breakout Close (Momentum entry).
+  - If % moved from OR $\\le$ 0.3%, **Entry** = CMP (Momentum entry).
   - If % moved from OR > 0.3%, **Entry** is modeled at **OR High / OR Low** (Retest / Retracement entry).
 - **SL (Stop Loss):** Opening-Range Midpoint (`or-mid` = $\\frac{\\text{OR High} + \\text{OR Low}}{2}$)
 - **Target (1R):** 1:1 Risk-to-Reward ratio (`Target = Entry ± Risk`)
 - **Position Size (Qty):** Sized for a fixed **Max Loss of ₹1,000**
-- **Volume Ratio:** Exact volume of the **initial breakout candle** divided by the **10-period SMA of 5-minute volume** preceding it.
+- **Volume Ratio:** Breakout candle volume divided by the **10-period SMA of 5-minute volume**.
 - **Confidence (%) (0–100%):** Composite score. **Rows with >= 80% are highlighted in yellow.**
 - **Auto-refreshes every 5 minutes.**
 """)
+
+SECTOR_MAP = {
+    "TCS": "IT", "INFY": "IT", "HCLTECH": "IT", "TECHM": "IT", "WIPRO": "IT", "LTIM": "IT",
+    "HDFCBANK": "Banking & Financials", "ICICIBANK": "Banking & Financials", "AXISBANK": "Banking & Financials",
+    "KOTAKBANK": "Banking & Financials", "SBIN": "Banking & Financials", "BAJFINANCE": "Banking & Financials",
+    "BAJAJFINSV": "Banking & Financials", "JIOFIN": "Banking & Financials", "SHRIRAMFIN": "Banking & Financials",
+    "SBILIFE": "Banking & Financials", "HDFCLIFE": "Banking & Financials",
+    "RELIANCE": "Energy & Oil/Gas", "ONGC": "Energy & Oil/Gas", "NTPC": "Energy & Oil/Gas",
+    "POWERGRID": "Energy & Oil/Gas", "BPCL": "Energy & Oil/Gas", "COALINDIA": "Energy & Oil/Gas",
+    "MARUTI": "Auto", "TATAMOTORS": "Auto", "M&M": "Auto", "BAJAJ-AUTO": "Auto", "EICHERMOT": "Auto", "HEROMOTOCO": "Auto",
+    "ITC": "FMCG", "HINDUNILVR": "FMCG", "NESTLEIND": "FMCG", "TATACONSUM": "FMCG", "BRITANNIA": "FMCG",
+    "TATASTEEL": "Metals", "JSWSTEEL": "Metals", "HINDALCO": "Metals", "VEDL": "Metals",
+    "SUNPHARMA": "Pharma", "DRREDDY": "Pharma", "CIPLA": "Pharma", "DIVISLAB": "Pharma", "APOLLOHOSP": "Pharma", "LUPIN": "Pharma",
+    "LT": "Industrials & Infra", "ULTRACEMCO": "Cement & Materials", "GRASIM": "Cement & Materials",
+    "ADANIENT": "Diversified / Infra", "ADANIPORTS": "Infrastructure", "TRENT": "Consumer & Retail",
+    "TITAN": "Consumer & Retail", "INDIGO": "Aviation & Services", "MAXHEALTH": "Healthcare", "BSE": "Financial Services"
+}
 
 def calculate_indicators(bars):
     closes = pd.Series([b["c"] for b in bars])
@@ -133,7 +153,7 @@ def render_dashboard():
 
     st.write(f"**Last Updated:** {nse_data.now_ist().strftime('%Y-%m-%d %H:%M:%S')} IST")
 
-    with st.spinner("Scanning Nifty 50 stocks on anchor breakout candles..."):
+    with st.spinner("Scanning Nifty 50 stocks & computing sector strength..."):
         try:
             symbols = nse_data.index_constituents("NIFTY50")
             results = []
@@ -156,6 +176,9 @@ def render_dashboard():
                     day_open = day_bars[0]["o"]
                     pct_chg = round(((cmp_val - day_open) / day_open) * 100, 2)
 
+                    bare_sym = nse_data.bare_symbol(sym)
+                    sector = SECTOR_MAP.get(bare_sym, "Other")
+
                     or_bars = day_bars[:3]
                     or_high = max(b["h"] for b in or_bars)
                     or_low = min(b["l"] for b in or_bars)
@@ -172,24 +195,26 @@ def render_dashboard():
                     pct_moved = "-"
                     confidence = "-"
 
-                    # Find the FIRST (anchor) breakout bar after the opening range
                     anchor_breakout_bar = None
                     anchor_idx = -1
+                    break_side = "WAITING"
+
                     for idx, b in enumerate(completed_bars[3:], start=3):
                         if b["c"] > or_high:
                             anchor_breakout_bar = b
                             anchor_idx = idx
                             break_side = "BUY (Long)"
-                            break
                         elif b["c"] < or_low:
                             anchor_breakout_bar = b
                             anchor_idx = idx
                             break_side = "SELL (Short)"
-                            break
+                        elif or_low <= b["c"] <= or_high:
+                            anchor_breakout_bar = None
+                            anchor_idx = -1
+                            break_side = "WAITING"
 
                     if anchor_breakout_bar is not None:
-                        # Check validity: Long must stay above or_low; Short must stay below or_high
-                        if break_side == "BUY (Long)" and cmp_val >= or_low:
+                        if break_side == "BUY (Long)" and cmp_val >= or_high:
                             triggered = True
                             side = "BUY (Long)"
                             breakout_close = anchor_breakout_bar["c"]
@@ -206,7 +231,6 @@ def render_dashboard():
                             qty = max(1, int(1000 / risk)) if risk > 0 else 1
                             max_loss = 1000
 
-                            # Volume ratio of the anchor breakout candle vs prior 10-bar SMA
                             vols = [b.get("v", 0) for b in completed_bars]
                             non_zero_vols = [v for v in vols if v > 0]
                             b_vol = anchor_breakout_bar.get("v", 0)
@@ -219,7 +243,7 @@ def render_dashboard():
                             rsi_val, macd_hist, prev_hist = calculate_indicators(completed_bars[:anchor_idx+1])
                             confidence = compute_confidence(side, vol_ratio, rsi_val, macd_hist, prev_hist, completed_bars[:anchor_idx+1], cmp_val)
 
-                        elif break_side == "SELL (Short)" and cmp_val <= or_high:
+                        elif break_side == "SELL (Short)" and cmp_val <= or_low:
                             triggered = True
                             side = "SELL (Short)"
                             breakout_close = anchor_breakout_bar["c"]
@@ -251,7 +275,8 @@ def render_dashboard():
                     status = "TRIGGERED" if triggered else "WAITING"
 
                     results.append({
-                        "Symbol": nse_data.bare_symbol(sym),
+                        "Symbol": bare_sym,
+                        "Sector": sector,
                         "Status": status,
                         "Side": side,
                         "CMP (INR)": round(cmp_val, 2),
@@ -272,9 +297,13 @@ def render_dashboard():
 
             df = pd.DataFrame(results)
             if not df.empty:
-                triggered_df = df[df["Status"] == "TRIGGERED"].sort_values(by="Volume Ratio", ascending=False)
-                waiting_df = df[df["Status"] == "WAITING"].sort_values(by="% Change", ascending=False)
+                # Calculate Sector Strength Rankings (% change averaged per sector)
+                sector_df = df.groupby("Sector")["% Change"].mean().reset_index()
+                sector_df.columns = ["Sector", "Avg % Change"]
+                sector_df = sector_df.sort_values(by="Avg % Change", ascending=False).reset_index(drop=True)
+                sector_df["Avg % Change"] = sector_df["Avg % Change"].round(2)
 
+                st.subheader("📊 Sector Strength Leaderboard (Daily Strength)")
                 def color_pct(val):
                     try:
                         v = float(val)
@@ -285,6 +314,20 @@ def render_dashboard():
                     except:
                         pass
                     return ""
+
+                st.dataframe(
+                    sector_df.style.map(color_pct, subset=["Avg % Change"]) if hasattr(pd.DataFrame().style, "map") else sector_df.style.applymap(color_pct, subset=["Avg % Change"]),
+                    use_container_width=True
+                )
+
+                # Sidebar Sector Filter
+                all_sectors = sorted(df["Sector"].unique().tolist())
+                selected_sectors = st.sidebar.multiselect("Filter by Sector(s):", options=all_sectors, default=all_sectors)
+
+                filtered_df = df[df["Sector"].isin(selected_sectors)]
+
+                triggered_df = filtered_df[filtered_df["Status"] == "TRIGGERED"].sort_values(by="Volume Ratio", ascending=False)
+                waiting_df = filtered_df[filtered_df["Status"] == "WAITING"].sort_values(by="% Change", ascending=False)
 
                 def highlight_high_confidence(row):
                     try:
@@ -324,7 +367,7 @@ def render_dashboard():
                         use_container_width=True
                     )
                 else:
-                    st.info("No active breakouts or breakdowns at completed candle closes.")
+                    st.info("No active breakouts or breakdowns for selected sector(s).")
 
                 st.subheader(f"⏳ Waiting / Scanning [{len(waiting_df)}]")
                 st.dataframe(
@@ -333,11 +376,11 @@ def render_dashboard():
                 )
 
                 # Download button
-                csv = df.to_csv(index=False).encode("utf-8")
+                csv = filtered_df.to_csv(index=False).encode("utf-8")
                 st.download_button(
-                    label="Download Full Scan CSV",
+                    label="Download Filtered Scan CSV",
                     data=csv,
-                    file_name=f"nifty50_orb_breakdown_scan_{nse_data.now_ist().strftime('%Y%m%d_%H%M')}.csv",
+                    file_name=f"nifty50_sector_scan_{nse_data.now_ist().strftime('%Y%m%d_%H%M')}.csv",
                     mime="text/csv"
                 )
             else:
