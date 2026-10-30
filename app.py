@@ -22,7 +22,7 @@ This dashboard monitors the **Nifty 50 universe** for 15-minute Opening-Range br
 - **SL (Stop Loss):** Opening-Range Midpoint (`or-mid` = $\\frac{\\text{OR High} + \\text{OR Low}}{2}$)
 - **Target (1R):** 1:1 Risk-to-Reward ratio (`Target = Entry ± Risk`)
 - **Position Size (Qty):** Sized for a fixed **Max Loss of ₹1,000**
-- **Volume Ratio:** Latest 5-minute candle volume compared against the **10-period SMA of 5-minute volume**.
+- **Volume Ratio:** Latest non-zero 5-minute candle volume compared against the **10-period SMA of 5-minute volume**.
 - **Auto-refreshes every 5 minutes.**
 """)
 
@@ -68,10 +68,10 @@ def render_dashboard():
                     vol_ratio = "-"
                     pct_moved = "-"
 
-                    # 10-period SMA of 5-minute volume
+                    # 10-period SMA of 5-minute volume (using latest non-zero volume bars)
                     vols = [b["v"] for b in day_bars if b.get("v", 0) > 0]
                     vol_sma10 = sum(vols[-10:]) / len(vols[-10:]) if len(vols) >= 5 else (sum(vols) / len(vols) if vols else 1)
-                    current_vol = day_bars[-1].get("v", 0)
+                    current_vol = vols[-1] if vols else 0
                     calc_vol_ratio = round(current_vol / vol_sma10, 2) if vol_sma10 > 0 else 1.0
 
                     if cmp_val > or_high:
