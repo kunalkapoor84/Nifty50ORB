@@ -22,8 +22,8 @@ This dashboard monitors the **Nifty 50 universe** for 15-minute Opening-Range br
 - **SL (Stop Loss):** Opening-Range Midpoint (`or-mid` = $\\frac{\\text{OR High} + \\text{OR Low}}{2}$)
 - **Target (1R):** 1:1 Risk-to-Reward ratio (`Target = Entry ± Risk`)
 - **Position Size (Qty):** Sized for a fixed **Max Loss of ₹1,000**
-- **Volume Ratio:** Breakout candle volume divided by the **10-period SMA of 5-minute volume**.
-- **Confidence (%) (0–100%):** Composite score (Volume Ratio, RSI, MACD, Candle Size, Retracement Volume). **Rows with >= 80% are highlighted in yellow.**
+- **Volume Ratio:** Breakout candle volume divided by the **10-period SMA of 5-minute volume** (with robust non-zero fallback).
+- **Confidence (%) (0–100%):** Composite score factoring in **Volume Ratio (30 pts)**, **RSI (20 pts)**, **MACD (20 pts)**, **Breakout Candle Size (20 pts)**, and **Pullback Volume (10 pts)**. **Rows with >= 80% are highlighted in yellow.**
 - **Auto-refreshes every 5 minutes.**
 """)
 
@@ -167,7 +167,6 @@ def render_dashboard():
                     pct_moved = "-"
                     confidence = "-"
 
-                    # Robust volume SMA and breakout volume calculation
                     vols = [b.get("v", 0) for b in day_bars]
                     non_zero_vols = [v for v in vols if v > 0]
                     vol_sma10 = sum(non_zero_vols[-10:]) / len(non_zero_vols[-10:]) if len(non_zero_vols) >= 3 else (sum(non_zero_vols) / len(non_zero_vols) if non_zero_vols else 1.0)
@@ -178,11 +177,12 @@ def render_dashboard():
                     for idx, b in enumerate(day_bars[3:], start=3):
                         if b["c"] > or_high or b["c"] < or_low:
                             b_vol = b.get("v", 0)
-                            if b_vol > 0:
-                                prior_vols = [day_bars[j]["v"] for j in range(max(0, idx - 10), idx) if day_bars[j].get("v", 0) > 0]
-                                sma_p = sum(prior_vols) / len(prior_vols) if prior_vols else vol_sma10
-                                if sma_p > 0:
-                                    calc_vol_ratio = round(b_vol / sma_p, 2)
+                            if b_vol <= 0 and non_zero_vols:
+                                b_vol = non_zero_vols[-1]
+                            prior_vols = [day_bars[j]["v"] for j in range(max(0, idx - 10), idx) if day_bars[j].get("v", 0) > 0]
+                            sma_p = sum(prior_vols) / len(prior_vols) if prior_vols else vol_sma10
+                            if sma_p > 0:
+                                calc_vol_ratio = round(b_vol / sma_p, 2)
 
                     if cmp_val > or_high:
                         triggered = True
