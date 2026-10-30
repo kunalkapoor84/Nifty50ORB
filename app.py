@@ -12,24 +12,25 @@ st.set_page_config(
 
 st.title("📈 Nifty 50 Live Opening-Range Breakout & Breakdown Dashboard")
 st.markdown("""
-This dashboard monitors the **Nifty 50 universe** for 15-minute Opening-Range breakouts (Long) and breakdowns (Short) based on current live price action.
+This dashboard monitors the **Nifty 50 universe** for 15-minute Opening-Range breakouts (Long) and breakdowns (Short) based on **completed 5-minute candle closes**.
 
 ### 📐 Strategy & Risk Rules:
-- **Side:** BUY (CMP > OR High) or SELL (CMP < OR Low)
+- **Candle Close Rule:** Strictly waits for the 5-minute candle to close before triggering ORB / Breakdown and calculating indicators.
+- **Side:** BUY (Completed Close > OR High) or SELL (Completed Close < OR Low)
 - **Entry Model:** 
-  - If % moved from OR $\\le$ 0.3%, **Entry** = CMP (Momentum entry).
+  - If % moved from OR $\\le$ 0.3%, **Entry** = Completed Close (Momentum entry).
   - If % moved from OR > 0.3%, **Entry** is modeled at **OR High / OR Low** (Retest / Retracement entry).
 - **SL (Stop Loss):** Opening-Range Midpoint (`or-mid` = $\\frac{\\text{OR High} + \\text{OR Low}}{2}$)
 - **Target (1R):** 1:1 Risk-to-Reward ratio (`Target = Entry ± Risk`)
 - **Position Size (Qty):** Sized for a fixed **Max Loss of ₹1,000**
-- **Volume Ratio:** Breakout candle volume divided by the **10-period SMA of 5-minute volume** (with robust non-zero fallback).
+- **Volume Ratio:** Breakout candle volume divided by the **10-period SMA of 5-minute volume**.
 - **Confidence (%) (0–100%):** Composite score factoring in **Volume Ratio (30 pts)**, **RSI (20 pts)**, **MACD (20 pts)**, **Breakout Candle Size (20 pts)**, and **Pullback Volume (10 pts)**. **Rows with >= 80% are highlighted in yellow.**
 - **Auto-refreshes every 5 minutes.**
 """)
 
-def calculate_indicators(day_bars):
-    closes = pd.Series([b["c"] for b in day_bars])
-    vols = pd.Series([b["v"] for b in day_bars])
+def calculate_indicators(bars):
+    closes = pd.Series([b["c"] for b in bars])
+    vols = pd.Series([b["v"] for b in bars])
 
     # RSI (14)
     delta = closes.diff()
@@ -50,7 +51,7 @@ def calculate_indicators(day_bars):
 
     return current_rsi, current_hist, prev_hist
 
-def compute_confidence(side, vol_ratio, rsi, macd_hist, prev_hist, day_bars, cmp_val):
+def compute_confidence(side, vol_ratio, rsi, macd_hist, prev_hist, bars, cmp_val):
     score = 0
     # 1. Volume Ratio (0-30)
     if vol_ratio >= 2.0:
@@ -99,9 +100,9 @@ def compute_confidence(side, vol_ratio, rsi, macd_hist, prev_hist, day_bars, cmp
             score += 5
 
     # 4. Breakout Candle Size vs Average Range (0-20)
-    ranges = [b["h"] - b["l"] for b in day_bars]
+    ranges = [b["h"] - b["l"] for b in bars]
     avg_range = sum(ranges) / len(ranges) if ranges else 1
-    latest_range = day_bars[-1]["h"] - day_bars[-1]["l"]
+    latest_range = bars[-1]["h"] - bars[-1]["l"]
     range_ratio = latest_range / avg_range if avg_range > 0 else 1.0
     if range_ratio >= 1.5:
         score += 20
@@ -111,10 +112,10 @@ def compute_confidence(side, vol_ratio, rsi, macd_hist, prev_hist, day_bars, cmp
         score += 10
 
     # 5. Decreasing volume on retracement bonus (0-10)
-    if len(day_bars) >= 2:
-        prev_vol = day_bars[-2].get("v", 0)
-        curr_vol = day_bars[-1].get("v", 0)
-        is_pullback = (side == "BUY (Long)" and cmp_val < day_bars[-2]["c"]) or (side == "SELL (Short)" and cmp_val > day_bars[-2]["c"])
+    if len(bars) >= 2:
+        prev_vol = bars[-2].get("v", 0)
+        curr_vol = bars[-1].get("v", 0)
+        is_pullback = (side == "BUY (Long)" and cmp_val < bars[-2]["c"]) or (side == "SELL (Short)" and cmp_val > bars[-2]["c"])
         if is_pullback and curr_vol < prev_vol:
             score += 10
         else:
@@ -132,10 +133,12 @@ def render_dashboard():
 
     st.write(f"**Last Updated:** {nse_data.now_ist().strftime('%Y-%m-%d %H:%M:%S')} IST")
 
-    with st.spinner("Scanning Nifty 50 stocks for breakouts & breakdowns..."):
+    with st.spinner("Scanning Nifty 50 stocks on completed 5-min candle closes..."):
         try:
             symbols = nse_data.index_constituents("NIFTY50")
             results = []
+            now = nse_data.now_ist()
+
             for sym in symbols:
                 try:
                     bars = nse_data.load_bars(sym, days=5)
@@ -145,7 +148,12 @@ def render_dashboard():
                     if len(day_bars) < 3:
                         continue
                     
-                    cmp_val = day_bars[-1]["c"]
+                    # Restrict to completed 5-minute bars (bar close time <= now)
+                    completed_bars = [b for b in day_bars if nse_data.bar_close(b) <= now]
+                    if not completed_bars:
+                        completed_bars = day_bars
+
+                    cmp_val = completed_bars[-1]["c"]
                     day_open = day_bars[0]["o"]
                     pct_chg = round(((cmp_val - day_open) / day_open) * 100, 2)
 
@@ -154,7 +162,7 @@ def render_dashboard():
                     or_low = min(b["l"] for b in or_bars)
                     or_mid = round((or_high + or_low) / 2, 2)
                     
-                    rsi_val, macd_hist, prev_hist = calculate_indicators(day_bars)
+                    rsi_val, macd_hist, prev_hist = calculate_indicators(completed_bars)
 
                     triggered = False
                     side = "WAITING"
@@ -167,19 +175,19 @@ def render_dashboard():
                     pct_moved = "-"
                     confidence = "-"
 
-                    vols = [b.get("v", 0) for b in day_bars]
+                    vols = [b.get("v", 0) for b in completed_bars]
                     non_zero_vols = [v for v in vols if v > 0]
                     vol_sma10 = sum(non_zero_vols[-10:]) / len(non_zero_vols[-10:]) if len(non_zero_vols) >= 3 else (sum(non_zero_vols) / len(non_zero_vols) if non_zero_vols else 1.0)
                     if vol_sma10 <= 0:
                         vol_sma10 = 1.0
 
                     calc_vol_ratio = 1.0
-                    for idx, b in enumerate(day_bars[3:], start=3):
+                    for idx, b in enumerate(completed_bars[3:], start=3):
                         if b["c"] > or_high or b["c"] < or_low:
                             b_vol = b.get("v", 0)
                             if b_vol <= 0 and non_zero_vols:
                                 b_vol = non_zero_vols[-1]
-                            prior_vols = [day_bars[j]["v"] for j in range(max(0, idx - 10), idx) if day_bars[j].get("v", 0) > 0]
+                            prior_vols = [completed_bars[j]["v"] for j in range(max(0, idx - 10), idx) if completed_bars[j].get("v", 0) > 0]
                             sma_p = sum(prior_vols) / len(prior_vols) if prior_vols else vol_sma10
                             if sma_p > 0:
                                 calc_vol_ratio = round(b_vol / sma_p, 2)
@@ -200,7 +208,7 @@ def render_dashboard():
                         qty = max(1, int(1000 / risk)) if risk > 0 else 1
                         max_loss = 1000
                         vol_ratio = calc_vol_ratio
-                        confidence = compute_confidence(side, vol_ratio, rsi_val, macd_hist, prev_hist, day_bars, cmp_val)
+                        confidence = compute_confidence(side, vol_ratio, rsi_val, macd_hist, prev_hist, completed_bars, cmp_val)
 
                     elif cmp_val < or_low:
                         triggered = True
@@ -218,7 +226,7 @@ def render_dashboard():
                         qty = max(1, int(1000 / risk)) if risk > 0 else 1
                         max_loss = 1000
                         vol_ratio = calc_vol_ratio
-                        confidence = compute_confidence(side, vol_ratio, rsi_val, macd_hist, prev_hist, day_bars, cmp_val)
+                        confidence = compute_confidence(side, vol_ratio, rsi_val, macd_hist, prev_hist, completed_bars, cmp_val)
 
                     status = "TRIGGERED" if triggered else "WAITING"
 
@@ -296,7 +304,7 @@ def render_dashboard():
                         use_container_width=True
                     )
                 else:
-                    st.info("No active breakouts or breakdowns at current CMP.")
+                    st.info("No active breakouts or breakdowns at completed candle closes.")
 
                 st.subheader(f"⏳ Waiting / Scanning [{len(waiting_df)}]")
                 st.dataframe(
