@@ -133,10 +133,16 @@ def render_dashboard():
                         pass
                     return ""
 
+                def style_df(styler):
+                    try:
+                        return styler.map(color_pct, subset=["% Change"])
+                    except AttributeError:
+                        return styler.applymap(color_pct, subset=["% Change"])
+
                 st.subheader(f"🚀 Triggered Setups (Breakouts & Breakdowns) [{len(triggered_df)}]")
                 if not triggered_df.empty:
                     st.dataframe(
-                        triggered_df.style.applymap(color_pct, subset=["% Change"]),
+                        style_df(triggered_df.style),
                         use_container_width=True
                     )
                 else:
@@ -144,7 +150,7 @@ def render_dashboard():
 
                 st.subheader(f"⏳ Waiting / Scanning [{len(waiting_df)}]")
                 st.dataframe(
-                    waiting_df.style.applymap(color_pct, subset=["% Change"]),
+                    style_df(waiting_df.style),
                     use_container_width=True
                 )
 
