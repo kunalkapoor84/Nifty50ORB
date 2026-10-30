@@ -22,9 +22,104 @@ This dashboard monitors the **Nifty 50 universe** for 15-minute Opening-Range br
 - **SL (Stop Loss):** Opening-Range Midpoint (`or-mid` = $\\frac{\\text{OR High} + \\text{OR Low}}{2}$)
 - **Target (1R):** 1:1 Risk-to-Reward ratio (`Target = Entry ± Risk`)
 - **Position Size (Qty):** Sized for a fixed **Max Loss of ₹1,000**
-- **Volume Ratio:** Latest non-zero 5-minute candle volume compared against the **10-period SMA of 5-minute volume**.
+- **Confidence Ratio (0–100%):** Composite score factoring in **Volume Ratio (0-30 pts)**, **RSI (0-20 pts)**, **MACD Momentum (0-20 pts)**, **Breakout Candle Size (0-20 pts)**, and **Volume on Retracement (0-10 pts)**.
 - **Auto-refreshes every 5 minutes.**
 """)
+
+def calculate_indicators(day_bars):
+    closes = pd.Series([b["c"] for b in day_bars])
+    vols = pd.Series([b["v"] for b in day_bars])
+
+    # RSI (14)
+    delta = closes.diff()
+    gain = delta.where(delta > 0, 0.0).rolling(window=14, min_periods=1).mean()
+    loss = (-delta.where(delta < 0, 0.0)).rolling(window=14, min_periods=1).mean()
+    rs = gain / (loss + 1e-9)
+    rsi = 100 - (100 / (1 + rs))
+    current_rsi = rsi.iloc[-1] if not rsi.empty else 50.0
+
+    # MACD (12, 26, 9)
+    ema12 = closes.ewm(span=12, adjust=False).mean()
+    ema26 = closes.ewm(span=26, adjust=False).mean()
+    macd_line = ema12 - ema26
+    signal_line = macd_line.ewm(span=9, adjust=False).mean()
+    macd_hist = macd_line - signal_line
+    current_hist = macd_hist.iloc[-1] if not macd_hist.empty else 0.0
+    prev_hist = macd_hist.iloc[-2] if len(macd_hist) > 1 else 0.0
+
+    return current_rsi, current_hist, prev_hist
+
+def compute_confidence(side, vol_ratio, rsi, macd_hist, prev_hist, day_bars, cmp_val):
+    score = 0
+    # 1. Volume Ratio (0-30)
+    if vol_ratio >= 2.0:
+        score += 30
+    elif vol_ratio >= 1.5:
+        score += 22
+    elif vol_ratio >= 1.0:
+        score += 15
+    else:
+        score += 5
+
+    # 2. RSI (0-20)
+    if side == "BUY (Long)":
+        if 55 <= rsi <= 75:
+            score += 20
+        elif 50 <= rsi < 55:
+            score += 15
+        elif rsi > 75:
+            score += 12
+        else:
+            score += 5
+    else: # Short
+        if 25 <= rsi <= 45:
+            score += 20
+        elif 45 < rsi <= 50:
+            score += 15
+        elif rsi < 25:
+            score += 12
+        else:
+            score += 5
+
+    # 3. MACD Momentum (0-20)
+    if side == "BUY (Long)":
+        if macd_hist > 0 and macd_hist > prev_hist:
+            score += 20
+        elif macd_hist > 0:
+            score += 15
+        else:
+            score += 5
+    else:
+        if macd_hist < 0 and macd_hist < prev_hist:
+            score += 20
+        elif macd_hist < 0:
+            score += 15
+        else:
+            score += 5
+
+    # 4. Breakout Candle Size vs Average Range (0-20)
+    ranges = [b["h"] - b["l"] for b in day_bars]
+    avg_range = sum(ranges) / len(ranges) if ranges else 1
+    latest_range = day_bars[-1]["h"] - day_bars[-1]["l"]
+    range_ratio = latest_range / avg_range if avg_range > 0 else 1.0
+    if range_ratio >= 1.5:
+        score += 20
+    elif range_ratio >= 1.0:
+        score += 15
+    else:
+        score += 10
+
+    # 5. Decreasing volume on retracement bonus (0-10)
+    if len(day_bars) >= 2:
+        prev_vol = day_bars[-2].get("v", 0)
+        curr_vol = day_bars[-1].get("v", 0)
+        is_pullback = (side == "BUY (Long)" and cmp_val < day_bars[-2]["c"]) or (side == "SELL (Short)" and cmp_val > day_bars[-2]["c"])
+        if is_pullback and curr_vol < prev_vol:
+            score += 10
+        else:
+            score += 5
+
+    return min(100, max(0, int(score)))
 
 @st.fragment(run_every="300s")
 def render_dashboard():
@@ -58,6 +153,8 @@ def render_dashboard():
                     or_low = min(b["l"] for b in or_bars)
                     or_mid = round((or_high + or_low) / 2, 2)
                     
+                    rsi_val, macd_hist, prev_hist = calculate_indicators(day_bars)
+
                     triggered = False
                     side = "WAITING"
                     entry = "-"
@@ -67,8 +164,8 @@ def render_dashboard():
                     max_loss = "-"
                     vol_ratio = "-"
                     pct_moved = "-"
+                    confidence = "-"
 
-                    # 10-period SMA of 5-minute volume (using latest non-zero volume bars)
                     vols = [b["v"] for b in day_bars if b.get("v", 0) > 0]
                     vol_sma10 = sum(vols[-10:]) / len(vols[-10:]) if len(vols) >= 5 else (sum(vols) / len(vols) if vols else 1)
                     current_vol = vols[-1] if vols else 0
@@ -90,6 +187,7 @@ def render_dashboard():
                         qty = max(1, int(1000 / risk)) if risk > 0 else 1
                         max_loss = 1000
                         vol_ratio = calc_vol_ratio
+                        confidence = compute_confidence(side, vol_ratio, rsi_val, macd_hist, prev_hist, day_bars, cmp_val)
 
                     elif cmp_val < or_low:
                         triggered = True
@@ -107,6 +205,7 @@ def render_dashboard():
                         qty = max(1, int(1000 / risk)) if risk > 0 else 1
                         max_loss = 1000
                         vol_ratio = calc_vol_ratio
+                        confidence = compute_confidence(side, vol_ratio, rsi_val, macd_hist, prev_hist, day_bars, cmp_val)
 
                     status = "TRIGGERED" if triggered else "WAITING"
 
@@ -124,7 +223,8 @@ def render_dashboard():
                         "OR High": round(or_high, 2),
                         "OR Low": round(or_low, 2),
                         "% Moved from OR": pct_moved,
-                        "Volume Ratio": vol_ratio if triggered else "-"
+                        "Volume Ratio": vol_ratio if triggered else "-",
+                        "Confidence": confidence if triggered else "-"
                     })
                 except Exception:
                     pass
@@ -156,6 +256,7 @@ def render_dashboard():
                         "OR Low": lambda x: f"{x:.2f}" if isinstance(x, (int, float)) else x,
                         "% Moved from OR": lambda x: f"{x:.2f}" if isinstance(x, (int, float)) else x,
                         "Volume Ratio": lambda x: f"{x:.2f}" if isinstance(x, (int, float)) else x,
+                        "Confidence": lambda x: f"{x}%" if isinstance(x, (int, float)) else x,
                     }
                     try:
                         return styler.map(color_pct, subset=["% Change", "% Moved from OR"]).format(fmt, na_rep="-")
