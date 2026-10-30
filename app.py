@@ -138,10 +138,21 @@ def render_dashboard():
                     return ""
 
                 def style_df(styler):
+                    fmt = {
+                        "CMP (INR)": "{:.2f}",
+                        "% Change": "{:.2f}",
+                        "Entry (INR)": "{:.2f}",
+                        "SL (INR)": "{:.2f}",
+                        "Target (INR)": "{:.2f}",
+                        "OR High": "{:.2f}",
+                        "OR Low": "{:.2f}",
+                        "% Moved from OR": "{:.2f}",
+                        "Volume Ratio": "{:.2f}",
+                    }
                     try:
-                        return styler.map(color_pct, subset=["% Change", "% Moved from OR"])
+                        return styler.map(color_pct, subset=["% Change", "% Moved from OR"]).format(fmt, na_rep="-")
                     except AttributeError:
-                        return styler.applymap(color_pct, subset=["% Change", "% Moved from OR"])
+                        return styler.applymap(color_pct, subset=["% Change", "% Moved from OR"]).format(fmt, na_rep="-")
 
                 st.subheader(f"🚀 Triggered Setups (Breakouts & Breakdowns) [{len(triggered_df)}]")
                 if not triggered_df.empty:
