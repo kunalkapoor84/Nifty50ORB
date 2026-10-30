@@ -13,10 +13,15 @@ st.set_page_config(
 st.title("📈 Nifty 50 Live Opening-Range Breakout & Breakdown Dashboard")
 st.markdown("""
 This dashboard monitors the **Nifty 50 universe** for 15-minute Opening-Range breakouts (Long) and breakdowns (Short).
+
+### 📐 Strategy & Risk Rules:
 - **Side:** BUY (Breakout > OR High) or SELL (Breakdown < OR Low)
-- **SL (Stop Loss):** Opening-Range Midpoint (`or-mid`)
-- **Target (1R):** Calculated at 1:1 risk-to-reward from entry
-- **Position Size (Qty):** Sized for a **Max Loss of ₹1,000**
+- **SL (Stop Loss):** Opening-Range Midpoint (`or-mid` = $\\frac{\\text{OR High} + \\text{OR Low}}{2}$)
+- **Target (1R):** 1:1 Risk-to-Reward ratio:
+  - *Long:* $\\text{Target} = \\text{Entry} + (\\text{Entry} - \\text{SL})$
+  - *Short:* $\\text{Target} = \\text{Entry} - (\\text{SL} - \\text{Entry})$
+- **Position Size (Qty):** Sized for a fixed **Max Loss of ₹1,000** ($\\text{Qty} = \\frac{1000}{|\\text{Entry} - \\text{SL}|}$)
+- **% Change:** Intraday percentage change from the market open.
 - **Auto-refreshes every 5 minutes.**
 """)
 
@@ -42,7 +47,11 @@ def render_dashboard():
                     day_bars = nse_data.day_bars(bars, bars[-1]["t"].date())
                     if len(day_bars) < 3:
                         continue
+                    
                     cmp_val = day_bars[-1]["c"]
+                    day_open = day_bars[0]["o"]
+                    pct_chg = round(((cmp_val - day_open) / day_open) * 100, 2)
+
                     or_bars = day_bars[:3]
                     or_high = max(b["h"] for b in or_bars)
                     or_low = min(b["l"] for b in or_bars)
@@ -51,11 +60,12 @@ def render_dashboard():
                     # Check for trigger after opening range (bar index >= 3)
                     triggered = False
                     side = "WAITING"
-                    entry = cmp_val
+                    entry = round(cmp_val, 2)
                     sl = or_mid
                     target = 0.0
-                    qty = 0
-                    vol_ratio = 1.0
+                    qty = "-"
+                    max_loss = "-"
+                    vol_ratio = "-"
 
                     for b in day_bars[3:]:
                         # Long Breakout
@@ -67,6 +77,7 @@ def render_dashboard():
                             risk = entry - sl
                             target = round(entry + risk, 2)
                             qty = max(1, int(1000 / risk)) if risk > 0 else 1
+                            max_loss = 1000
                             base = [x["v"] for x in or_bars if x["v"]]
                             avg = sum(base) / len(base) if base else 1
                             vol_ratio = round(b["v"] / avg, 2) if avg else 1.0
@@ -80,6 +91,7 @@ def render_dashboard():
                             risk = sl - entry
                             target = round(entry - risk, 2)
                             qty = max(1, int(1000 / risk)) if risk > 0 else 1
+                            max_loss = 1000
                             base = [x["v"] for x in or_bars if x["v"]]
                             avg = sum(base) / len(base) if base else 1
                             vol_ratio = round(b["v"] / avg, 2) if avg else 1.0
@@ -91,14 +103,16 @@ def render_dashboard():
                         "Symbol": nse_data.bare_symbol(sym),
                         "Status": status,
                         "Side": side,
+                        "CMP (INR)": round(cmp_val, 2),
+                        "% Change": pct_chg,
                         "Entry (INR)": entry,
                         "SL (INR)": sl,
-                        "Target (INR)": target,
-                        "Qty": qty if triggered else "-",
-                        "Max Loss (INR)": 1000 if triggered else "-",
+                        "Target (INR)": target if triggered else "-",
+                        "Qty": qty,
+                        "Max Loss (INR)": max_loss,
                         "OR High": round(or_high, 2),
                         "OR Low": round(or_low, 2),
-                        "Volume Ratio": vol_ratio if triggered else "-"
+                        "Volume Ratio": vol_ratio
                     })
                 except Exception:
                     pass
@@ -106,17 +120,33 @@ def render_dashboard():
             df = pd.DataFrame(results)
             if not df.empty:
                 triggered_df = df[df["Status"] == "TRIGGERED"].sort_values(by="Volume Ratio", ascending=False)
-                waiting_df = df[df["Status"] == "WAITING"]
+                waiting_df = df[df["Status"] == "WAITING"].sort_values(by="% Change", ascending=False)
+
+                def color_pct(val):
+                    try:
+                        v = float(val)
+                        if v > 0:
+                            return "color: #2e7d32; font-weight: bold;"
+                        elif v < 0:
+                            return "color: #c62828; font-weight: bold;"
+                    except:
+                        pass
+                    return ""
 
                 st.subheader(f"🚀 Triggered Setups (Breakouts & Breakdowns) [{len(triggered_df)}]")
                 if not triggered_df.empty:
-                    st.dataframe(triggered_df, use_container_width=True)
+                    st.dataframe(
+                        triggered_df.style.applymap(color_pct, subset=["% Change"]),
+                        use_container_width=True
+                    )
                 else:
                     st.info("No breakouts or breakdowns triggered yet.")
 
                 st.subheader(f"⏳ Waiting / Scanning [{len(waiting_df)}]")
-                with st.expander("View Waiting Stocks"):
-                    st.dataframe(waiting_df, use_container_width=True)
+                st.dataframe(
+                    waiting_df.style.applymap(color_pct, subset=["% Change"]),
+                    use_container_width=True
+                )
 
                 # Download button
                 csv = df.to_csv(index=False).encode("utf-8")
