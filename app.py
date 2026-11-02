@@ -4,7 +4,11 @@ import time
 import os
 import nse_data
 import screener
-from streamlit_autorefresh import st_autorefresh
+try:
+    from streamlit_autorefresh import st_autorefresh
+    has_autorefresh = True
+except ImportError:
+    has_autorefresh = False
 
 st.set_page_config(
     page_title="Nifty 500 Screener & Live ORB Dashboard",
@@ -24,7 +28,10 @@ app_choice = st.sidebar.radio(
 st.sidebar.header("Dashboard Controls")
 auto_refresh = st.sidebar.checkbox("Auto-refresh active (every 5 mins)", value=True)
 if auto_refresh:
-    st_autorefresh(interval=300 * 1000, key="datarefresh")
+    if has_autorefresh:
+        st_autorefresh(interval=300 * 1000, key="datarefresh")
+    else:
+        st.markdown('<meta http-equiv="refresh" content="300">', unsafe_allow_html=True)
 
 if st.sidebar.button("Clear Cache & Rescan Now", type="primary"):
     st.cache_data.clear()
