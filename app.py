@@ -4,6 +4,16 @@ import time
 import os
 from dotenv import load_dotenv
 load_dotenv()
+
+# Load Streamlit Cloud secrets into environment variables if available
+try:
+    if "DHAN_CLIENT_ID" in st.secrets:
+        os.environ["DHAN_CLIENT_ID"] = st.secrets["DHAN_CLIENT_ID"]
+    if "DHAN_ACCESS_TOKEN" in st.secrets:
+        os.environ["DHAN_ACCESS_TOKEN"] = st.secrets["DHAN_ACCESS_TOKEN"]
+except Exception:
+    pass
+
 import nse_data
 import screener
 try:
