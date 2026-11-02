@@ -73,6 +73,23 @@ SECTOR_MAP = {
     "TITAN": "Consumer & Retail", "INDIGO": "Aviation & Services", "MAXHEALTH": "Healthcare", "BSE": "Financial Services"
 }
 
+SECTOR_INDICES = {
+    "IT": "^CNXIT",
+    "Banking & Financials": "^NSEBANK",
+    "Energy & Oil/Gas": "^CNXENERGY",
+    "Auto": "^CNXAUTO",
+    "FMCG": "^CNXFMCG",
+    "Metals": "^CNXMETAL",
+    "Pharma": "^CNXPHARMA",
+    "Industrials & Infra": "^CNXINFRA",
+    "Cement & Materials": "^CNXCMDT",
+    "Consumer & Retail": "^CNXCONSM",
+    "Infrastructure": "^CNXINFRA",
+    "Financial Services": "^CNXFIN",
+    "Healthcare": "^CNXPHARMA",
+    "Other": "^NSEI"
+}
+
 def calculate_indicators(bars):
     closes = pd.Series([b["c"] for b in bars])
     vols = pd.Series([b["v"] for b in bars])
@@ -174,17 +191,17 @@ def process_single_symbol(sym, source, now):
         if not completed_bars:
             completed_bars = day_bars
 
-        cmp_val = completed_bars[-1]["c"]
-        day_open = day_bars[0]["o"]
-        
-        # Get previous close for accurate % change matching exchange/Dhan
-        prev_close = None
+        meta = {}
         if source != "dhan":
             try:
                 meta = nse_data.yahoo_chart(nse_data.normalize_symbol(sym), range_="5d", interval="5m").get("meta", {})
-                prev_close = meta.get("previousClose") or meta.get("chartPreviousClose")
             except Exception:
                 pass
+
+        cmp_val = meta.get("regularMarketPrice") or completed_bars[-1]["c"]
+        day_open = day_bars[0]["o"]
+        
+        prev_close = meta.get("previousClose") or meta.get("chartPreviousClose")
         if not prev_close:
             s_map = nse_data.session_map(bars)
             dates = sorted(s_map.keys())
@@ -317,38 +334,69 @@ def process_single_symbol(sym, source, now):
         return None
 
 @st.cache_data(ttl=300)
-def run_unified_market_scan(index_name="NIFTY50", source="auto"):
-    index_symbols = nse_data.index_constituents(index_name)
-    all_sector_syms = [nse_data.normalize_symbol(s) for s in SECTOR_MAP.keys()]
-    target_symbols = list(dict.fromkeys(index_symbols + all_sector_syms))
-    
-    now = nse_data.now_ist()
-    scanned_dict = {}
+def run_sector_index_scan(source="auto"):
+    def process_sector_index(item):
+        sector_name, index_sym = item
+        try:
+            bars = nse_data.load_bars(index_sym, source=source, days=5)
+            if not bars:
+                return None
+            day_bars = nse_data.day_bars(bars, bars[-1]["t"].date())
+            if not day_bars:
+                return None
+            cmp_val = day_bars[-1]["c"]
+            
+            meta = {}
+            if source != "dhan":
+                try:
+                    meta = nse_data.yahoo_chart(index_sym, range_="5d", interval="5m").get("meta", {})
+                except Exception:
+                    pass
+            
+            prev_close = meta.get("previousClose") or meta.get("chartPreviousClose")
+            if not prev_close:
+                s_map = nse_data.session_map(bars)
+                dates = sorted(s_map.keys())
+                if len(dates) >= 2:
+                    prev_day = dates[-2]
+                    prev_day_bars = [s_map[prev_day][m] for m in sorted(s_map[prev_day])]
+                    prev_close = prev_day_bars[-1]["c"]
+                else:
+                    prev_close = day_bars[0]["o"]
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=15) as executor:
-        futures = {executor.submit(process_single_symbol, sym, source, now): sym for sym in target_symbols}
+            pct_chg = round(((cmp_val - prev_close) / prev_close) * 100, 2)
+            return {"Sector": sector_name, "Avg % Change": pct_chg}
+        except Exception:
+            return None
+
+    results = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        futures = {executor.submit(process_sector_index, item): item for item in SECTOR_INDICES.items()}
         for future in concurrent.futures.as_completed(futures):
             res = future.result()
             if res:
-                scanned_dict[res["Symbol"]] = res
+                results.append(res)
 
-    # 1. Index subset for tables
-    index_bare = [nse_data.bare_symbol(s) for s in index_symbols]
-    index_results = [scanned_dict[s] for s in index_bare if s in scanned_dict]
-    df_index = pd.DataFrame(index_results)
+    sec_df = pd.DataFrame(results)
+    if not sec_df.empty:
+        sec_df = sec_df.drop_duplicates(subset=["Sector"]).sort_values(by="Avg % Change", ascending=False).reset_index(drop=True)
+        return sec_df
+    return pd.DataFrame(columns=["Sector", "Avg % Change"])
 
-    # 2. Overall sector performance from all scanned symbols
-    all_results = list(scanned_dict.values())
-    if all_results:
-        sec_df = pd.DataFrame(all_results)
-        sector_perf = sec_df.groupby("Sector")["% Change"].mean().reset_index()
-        sector_perf.columns = ["Sector", "Avg % Change"]
-        sector_perf = sector_perf.sort_values(by="Avg % Change", ascending=False).reset_index(drop=True)
-        sector_perf["Avg % Change"] = sector_perf["Avg % Change"].round(2)
-    else:
-        sector_perf = pd.DataFrame(columns=["Sector", "Avg % Change"])
+@st.cache_data(ttl=300)
+def run_market_scan(index_name="NIFTY50", source="auto"):
+    symbols = nse_data.index_constituents(index_name)
+    now = nse_data.now_ist()
+    results = []
 
-    return df_index, sector_perf
+    with concurrent.futures.ThreadPoolExecutor(max_workers=15) as executor:
+        futures = {executor.submit(process_single_symbol, sym, source, now): sym for sym in symbols}
+        for future in concurrent.futures.as_completed(futures):
+            res = future.result()
+            if res:
+                results.append(res)
+
+    return pd.DataFrame(results)
 
 @st.cache_data(ttl=300)
 def run_fundamental_scan():
@@ -357,7 +405,7 @@ def run_fundamental_scan():
 if app_choice == "Live ORB & Breakdown Dashboard":
     st.title("📈 Nifty Live Opening-Range Breakout & Breakdown Dashboard")
     st.markdown("""
-    This dashboard monitors Indian equity indices for 15-minute Opening-Range breakouts (Long) and breakdowns (Short), backed by **lightning-fast unified parallel scanning** and an **overall Sector Strength leaderboard with interactive checkboxes**.
+    This dashboard monitors Indian equity indices for 15-minute Opening-Range breakouts (Long) and breakdowns (Short), backed by **fast parallel scanning** and an **official Sector Index Strength leaderboard with interactive checkboxes**.
     """)
 
     index_choice = st.sidebar.selectbox("Select Index / Universe", ["NIFTY50", "BANKNIFTY", "NIFTY100"], index=0)
@@ -368,8 +416,9 @@ if app_choice == "Live ORB & Breakdown Dashboard":
         format_func=lambda x: {"auto": "Auto (Dhan if configured, else Yahoo)", "dhan": "DhanHQ (Exchange Feed)", "yahoo": "Yahoo Finance"}[x]
     )
 
-    with st.spinner(f"Loading market scan & overall sector performance for {index_choice} using {data_source.upper()}..."):
-        df, sector_df = run_unified_market_scan(index_choice, source=data_source)
+    with st.spinner(f"Loading market scan for {index_choice} & overall sector performance using {data_source.upper()}..."):
+        df = run_market_scan(index_choice, source=data_source)
+        sector_df = run_sector_index_scan(source=data_source)
 
     if not df.empty:
         st.subheader("📊 Overall Sector Strength Leaderboard & Filter")
