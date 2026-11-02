@@ -2,8 +2,11 @@ import streamlit as st
 import pandas as pd
 import time
 import os
-from dotenv import load_dotenv
-load_dotenv()
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 # Load Streamlit Cloud secrets into environment variables if available
 try:
