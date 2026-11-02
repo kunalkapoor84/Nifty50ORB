@@ -3,23 +3,34 @@ import pandas as pd
 import time
 import os
 import nse_data
+import screener
+from streamlit_autorefresh import st_autorefresh
 
 st.set_page_config(
-    page_title="Nifty 50 Live ORB & Breakdown Dashboard",
+    page_title="Nifty 500 Screener & Live ORB Dashboard",
     page_icon="📈",
     layout="wide"
 )
 
-st.title("📈 Nifty 50 Live Opening-Range Breakout & Breakdown Dashboard")
-st.markdown("""
-This dashboard monitors the **Nifty 50 universe** for 15-minute Opening-Range breakouts (Long) and breakdowns (Short), backed by **5-minute cached scanning** and an **interactive Sector Strength grid with checkboxes**.
+st.sidebar.header("📱 Select App")
+app_choice = st.sidebar.radio(
+    "Choose Screener / Dashboard",
+    [
+        "Live ORB & Breakdown Dashboard",
+        "Fundamental & Volume Screener (P/E < 20, Vol > 2x, RSI > 50)"
+    ]
+)
 
-### 📐 Strategy & Risk Rules:
-- **Performance Caching:** Market data and indicators are cached for 5 minutes for instant UI responsiveness.
-- **Sector Strength Leaderboard & Grid:** Ranked daily by average constituent performance (% change). Check/uncheck sectors directly in the grid below to filter stocks instantly.
-- **Anchor Breakout Rule & Validity:** Sustaining **>= OR High** (Longs) or **<= OR Low** (Shorts) keeps setups active; pullbacks back into range reset for fresh breakouts.
-- **Confidence (%) (0–100%):** Composite score. **Rows with >= 80% are highlighted in yellow.**
-""")
+st.sidebar.header("Dashboard Controls")
+auto_refresh = st.sidebar.checkbox("Auto-refresh active (every 5 mins)", value=True)
+if auto_refresh:
+    st_autorefresh(interval=300 * 1000, key="datarefresh")
+
+if st.sidebar.button("Clear Cache & Rescan Now", type="primary"):
+    st.cache_data.clear()
+    st.rerun()
+
+st.write(f"**Last Updated:** {nse_data.now_ist().strftime('%Y-%m-%d %H:%M:%S')} IST")
 
 SECTOR_MAP = {
     "TCS": "IT", "INFY": "IT", "HCLTECH": "IT", "TECHM": "IT", "WIPRO": "IT", "LTIM": "IT",
@@ -134,8 +145,8 @@ def compute_confidence(side, vol_ratio, rsi, macd_hist, prev_hist, bars, cmp_val
     return min(100, max(0, int(score)))
 
 @st.cache_data(ttl=300)
-def run_market_scan():
-    symbols = nse_data.index_constituents("NIFTY50")
+def run_market_scan(index_name="NIFTY50"):
+    symbols = nse_data.index_constituents(index_name)
     results = []
     now = nse_data.now_ist()
 
@@ -277,21 +288,22 @@ def run_market_scan():
 
     return pd.DataFrame(results)
 
-def render_dashboard():
-    st.sidebar.header("Dashboard Controls")
-    auto_refresh = st.sidebar.checkbox("Auto-refresh active (every 5 mins)", value=True)
-    
-    if st.sidebar.button("Clear Cache & Rescan Now", type="primary"):
-        st.cache_data.clear()
-        st.rerun()
+@st.cache_data(ttl=300)
+def run_fundamental_scan():
+    return screener.screen_stocks(max_stocks=50)
 
-    st.write(f"**Last Updated:** {nse_data.now_ist().strftime('%Y-%m-%d %H:%M:%S')} IST")
+if app_choice == "Live ORB & Breakdown Dashboard":
+    st.title("📈 Nifty Live Opening-Range Breakout & Breakdown Dashboard")
+    st.markdown("""
+    This dashboard monitors Indian equity indices for 15-minute Opening-Range breakouts (Long) and breakdowns (Short), backed by **5-minute cached scanning** and an **interactive Sector Strength grid with checkboxes**.
+    """)
 
-    with st.spinner("Loading market scan & sector rankings..."):
-        df = run_market_scan()
+    index_choice = st.sidebar.selectbox("Select Index / Universe", ["NIFTY50", "BANKNIFTY", "NIFTY100"], index=0)
+
+    with st.spinner(f"Loading market scan & sector rankings for {index_choice}..."):
+        df = run_market_scan(index_choice)
 
     if not df.empty:
-        # Calculate Sector Strength Rankings (% change averaged per sector)
         sector_df = df.groupby("Sector")["% Change"].mean().reset_index()
         sector_df.columns = ["Sector", "Avg % Change"]
         sector_df = sector_df.sort_values(by="Avg % Change", ascending=False).reset_index(drop=True)
@@ -299,13 +311,9 @@ def render_dashboard():
 
         st.subheader("📊 Sector Strength Leaderboard & Filter")
         
-        # Select All checkbox
         select_all = st.checkbox("Select All Sectors", value=True, key="select_all_sectors")
-
-        # Prepare editable sector dataframe with checkboxes
         sector_df["Select"] = select_all
         
-        # Use st.data_editor to allow interactive checkbox toggling in the grid
         edited_sector_df = st.data_editor(
             sector_df[["Select", "Sector", "Avg % Change"]],
             hide_index=True,
@@ -313,9 +321,7 @@ def render_dashboard():
             key="sector_grid_editor"
         )
 
-        # Get selected sectors from the grid
         selected_sectors = edited_sector_df[edited_sector_df["Select"] == True]["Sector"].tolist()
-
         filtered_df = df[df["Sector"].isin(selected_sectors)]
 
         triggered_df = filtered_df[filtered_df["Status"] == "TRIGGERED"].sort_values(by="Volume Ratio", ascending=False)
@@ -378,7 +384,6 @@ def render_dashboard():
             use_container_width=True
         )
 
-        # Download button
         csv = filtered_df.to_csv(index=False).encode("utf-8")
         st.download_button(
             label="Download Filtered Scan CSV",
@@ -389,4 +394,28 @@ def render_dashboard():
     else:
         st.warning("No data retrieved from Yahoo Finance.")
 
-render_dashboard()
+else:
+    st.title("🔍 Fundamental & Volume Stock Screener")
+    st.markdown("""
+    This screener filters stocks based on core criteria:
+    - **P/E Ratio** < 20
+    - **Volume Spike** > 2.0x 20-day average volume
+    - **RSI (14)** > 50
+    """)
+
+    with st.spinner("Running fundamental and technical volume screen..."):
+        fund_df = run_fundamental_scan()
+
+    if not fund_df.empty:
+        st.success(f"Found {len(fund_df)} stocks matching criteria!")
+        st.dataframe(fund_df, use_container_width=True)
+
+        csv = fund_df.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            label="Download Screener Results CSV",
+            data=csv,
+            file_name=f"fundamental_screener_{nse_data.now_ist().strftime('%Y%m%d_%H%M')}.csv",
+            mime="text/csv"
+        )
+    else:
+        st.info("No stocks currently match all filters (P/E < 20, Vol Ratio > 2.0, RSI > 50).")
