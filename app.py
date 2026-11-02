@@ -421,6 +421,15 @@ if app_choice == "Live ORB & Breakdown Dashboard":
         format_func=lambda x: {"auto": "Auto (Dhan if configured, else Yahoo)", "dhan": "DhanHQ (Exchange Feed)", "yahoo": "Yahoo Finance"}[x]
     )
 
+    st.sidebar.markdown("---")
+    if nse_data.dhan_ready():
+        st.sidebar.success("✅ Dhan API Connected")
+    else:
+        st.sidebar.warning("⚠️ Yahoo Mode (Dhan credentials missing in Secrets)")
+
+    if data_source == "dhan" and not nse_data.dhan_ready():
+        st.error("DhanHQ requested but credentials are missing or invalid in Streamlit Secrets. Please check Settings -> Secrets.")
+
     with st.spinner(f"Loading market scan for {index_choice} & overall sector performance using {data_source.upper()}..."):
         df = run_market_scan(index_choice, source=data_source)
         sector_df = run_sector_index_scan(source=data_source)
