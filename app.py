@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 import time
 import os
+from dotenv import load_dotenv
+load_dotenv()
 import nse_data
 import screener
 try:
@@ -152,14 +154,14 @@ def compute_confidence(side, vol_ratio, rsi, macd_hist, prev_hist, bars, cmp_val
     return min(100, max(0, int(score)))
 
 @st.cache_data(ttl=300)
-def run_market_scan(index_name="NIFTY50"):
+def run_market_scan(index_name="NIFTY50", source="auto"):
     symbols = nse_data.index_constituents(index_name)
     results = []
     now = nse_data.now_ist()
 
     for sym in symbols:
         try:
-            bars = nse_data.load_bars(sym, days=5)
+            bars = nse_data.load_bars(sym, source=source, days=5)
             if not bars:
                 continue
             day_bars = nse_data.day_bars(bars, bars[-1]["t"].date())
@@ -306,9 +308,15 @@ if app_choice == "Live ORB & Breakdown Dashboard":
     """)
 
     index_choice = st.sidebar.selectbox("Select Index / Universe", ["NIFTY50", "BANKNIFTY", "NIFTY100"], index=0)
+    data_source = st.sidebar.selectbox(
+        "Data Source",
+        ["auto", "dhan", "yahoo"],
+        index=0,
+        format_func=lambda x: {"auto": "Auto (Dhan if configured, else Yahoo)", "dhan": "DhanHQ (Exchange Feed)", "yahoo": "Yahoo Finance"}[x]
+    )
 
-    with st.spinner(f"Loading market scan & sector rankings for {index_choice}..."):
-        df = run_market_scan(index_choice)
+    with st.spinner(f"Loading market scan & sector rankings for {index_choice} using {data_source.upper()}..."):
+        df = run_market_scan(index_choice, source=data_source)
 
     if not df.empty:
         sector_df = df.groupby("Sector")["% Change"].mean().reset_index()
