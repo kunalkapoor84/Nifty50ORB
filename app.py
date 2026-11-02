@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 import time
 import os
+import concurrent.futures
+
 try:
     from dotenv import load_dotenv
     load_dotenv()
@@ -75,7 +77,6 @@ def calculate_indicators(bars):
     closes = pd.Series([b["c"] for b in bars])
     vols = pd.Series([b["v"] for b in bars])
 
-    # RSI (14)
     delta = closes.diff()
     gain = delta.where(delta > 0, 0.0).rolling(window=14, min_periods=1).mean()
     loss = (-delta.where(delta < 0, 0.0)).rolling(window=14, min_periods=1).mean()
@@ -83,7 +84,6 @@ def calculate_indicators(bars):
     rsi = 100 - (100 / (1 + rs))
     current_rsi = rsi.iloc[-1] if not rsi.empty else 50.0
 
-    # MACD (12, 26, 9)
     ema12 = closes.ewm(span=12, adjust=False).mean()
     ema26 = closes.ewm(span=26, adjust=False).mean()
     macd_line = ema12 - ema26
@@ -96,7 +96,6 @@ def calculate_indicators(bars):
 
 def compute_confidence(side, vol_ratio, rsi, macd_hist, prev_hist, bars, cmp_val):
     score = 0
-    # 1. Volume Ratio (0-25)
     if vol_ratio >= 2.0:
         score += 25
     elif vol_ratio >= 1.5:
@@ -106,7 +105,6 @@ def compute_confidence(side, vol_ratio, rsi, macd_hist, prev_hist, bars, cmp_val
     else:
         score += 3
 
-    # 2. RSI (0-20)
     if side == "BUY (Long)":
         if 55 <= rsi <= 70:
             score += 20
@@ -116,7 +114,7 @@ def compute_confidence(side, vol_ratio, rsi, macd_hist, prev_hist, bars, cmp_val
             score += 10
         else:
             score += 3
-    else: # Short
+    else:
         if 30 <= rsi <= 45:
             score += 20
         elif 45 < rsi <= 50:
@@ -126,7 +124,6 @@ def compute_confidence(side, vol_ratio, rsi, macd_hist, prev_hist, bars, cmp_val
         else:
             score += 3
 
-    # 3. MACD Momentum (0-20)
     if side == "BUY (Long)":
         if macd_hist > 0 and macd_hist > prev_hist:
             score += 20
@@ -142,7 +139,6 @@ def compute_confidence(side, vol_ratio, rsi, macd_hist, prev_hist, bars, cmp_val
         else:
             score += 3
 
-    # 4. Breakout Candle Size vs Average Range (0-20)
     ranges = [b["h"] - b["l"] for b in bars]
     avg_range = sum(ranges) / len(ranges) if ranges else 1
     latest_range = bars[-1]["h"] - bars[-1]["l"]
@@ -154,7 +150,6 @@ def compute_confidence(side, vol_ratio, rsi, macd_hist, prev_hist, bars, cmp_val
     else:
         score += 5
 
-    # 5. Decreasing volume on retracement bonus (0-15)
     if len(bars) >= 2:
         prev_vol = bars[-2].get("v", 0)
         curr_vol = bars[-1].get("v", 0)
@@ -166,28 +161,31 @@ def compute_confidence(side, vol_ratio, rsi, macd_hist, prev_hist, bars, cmp_val
 
     return min(100, max(0, int(score)))
 
-@st.cache_data(ttl=300)
-def run_market_scan(index_name="NIFTY50", source="auto"):
-    symbols = nse_data.index_constituents(index_name)
-    results = []
-    now = nse_data.now_ist()
+def process_single_symbol(sym, source, now):
+    try:
+        bars = nse_data.load_bars(sym, source=source, days=5)
+        if not bars:
+            return None
+        day_bars = nse_data.day_bars(bars, bars[-1]["t"].date())
+        if len(day_bars) < 3:
+            return None
+        
+        completed_bars = [b for b in day_bars if nse_data.bar_close(b) <= now]
+        if not completed_bars:
+            completed_bars = day_bars
 
-    for sym in symbols:
-        try:
-            bars = nse_data.load_bars(sym, source=source, days=5)
-            if not bars:
-                continue
-            day_bars = nse_data.day_bars(bars, bars[-1]["t"].date())
-            if len(day_bars) < 3:
-                continue
-            
-            completed_bars = [b for b in day_bars if nse_data.bar_close(b) <= now]
-            if not completed_bars:
-                completed_bars = day_bars
-
-            cmp_val = completed_bars[-1]["c"]
-            day_open = day_bars[0]["o"]
-            
+        cmp_val = completed_bars[-1]["c"]
+        day_open = day_bars[0]["o"]
+        
+        # Get previous close for accurate % change matching exchange/Dhan
+        prev_close = None
+        if source != "dhan":
+            try:
+                meta = nse_data.yahoo_chart(nse_data.normalize_symbol(sym), range_="5d", interval="5m").get("meta", {})
+                prev_close = meta.get("previousClose") or meta.get("chartPreviousClose")
+            except Exception:
+                pass
+        if not prev_close:
             s_map = nse_data.session_map(bars)
             dates = sorted(s_map.keys())
             if len(dates) >= 2:
@@ -197,128 +195,198 @@ def run_market_scan(index_name="NIFTY50", source="auto"):
             else:
                 prev_close = day_open
 
-            pct_chg = round(((cmp_val - prev_close) / prev_close) * 100, 2)
+        pct_chg = round(((cmp_val - prev_close) / prev_close) * 100, 2)
 
-            bare_sym = nse_data.bare_symbol(sym)
-            sector = SECTOR_MAP.get(bare_sym, "Other")
+        bare_sym = nse_data.bare_symbol(sym)
+        sector = SECTOR_MAP.get(bare_sym, "Other")
 
-            or_bars = day_bars[:3]
-            or_high = max(b["h"] for b in or_bars)
-            or_low = min(b["l"] for b in or_bars)
-            or_mid = round((or_high + or_low) / 2, 2)
-            
-            triggered = False
-            side = "WAITING"
-            entry = "-"
-            sl = "-"
-            target = "-"
-            qty = "-"
-            max_loss = "-"
-            vol_ratio = "-"
-            pct_moved = "-"
-            confidence = "-"
+        or_bars = day_bars[:3]
+        or_high = max(b["h"] for b in or_bars)
+        or_low = min(b["l"] for b in or_bars)
+        or_mid = round((or_high + or_low) / 2, 2)
+        
+        triggered = False
+        side = "WAITING"
+        entry = "-"
+        sl = "-"
+        target = "-"
+        qty = "-"
+        max_loss = "-"
+        vol_ratio = "-"
+        pct_moved = "-"
+        confidence = "-"
 
-            anchor_breakout_bar = None
-            anchor_idx = -1
-            break_side = "WAITING"
+        anchor_breakout_bar = None
+        anchor_idx = -1
+        break_side = "WAITING"
 
-            for idx, b in enumerate(completed_bars[3:], start=3):
-                if b["c"] > or_high:
-                    anchor_breakout_bar = b
-                    anchor_idx = idx
-                    break_side = "BUY (Long)"
-                elif b["c"] < or_low:
-                    anchor_breakout_bar = b
-                    anchor_idx = idx
-                    break_side = "SELL (Short)"
-                elif or_low <= b["c"] <= or_high:
-                    anchor_breakout_bar = None
-                    anchor_idx = -1
-                    break_side = "WAITING"
+        for idx, b in enumerate(completed_bars[3:], start=3):
+            if b["c"] > or_high:
+                anchor_breakout_bar = b
+                anchor_idx = idx
+                break_side = "BUY (Long)"
+            elif b["c"] < or_low:
+                anchor_breakout_bar = b
+                anchor_idx = idx
+                break_side = "SELL (Short)"
+            elif or_low <= b["c"] <= or_high:
+                anchor_breakout_bar = None
+                anchor_idx = -1
+                break_side = "WAITING"
 
-            if anchor_breakout_bar is not None:
-                if break_side == "BUY (Long)" and cmp_val >= or_high:
-                    triggered = True
-                    side = "BUY (Long)"
-                    breakout_close = anchor_breakout_bar["c"]
-                    pct_moved = round(((cmp_val - or_high) / or_high) * 100, 2)
+        if anchor_breakout_bar is not None:
+            if break_side == "BUY (Long)" and cmp_val >= or_high:
+                triggered = True
+                side = "BUY (Long)"
+                breakout_close = anchor_breakout_bar["c"]
+                pct_moved = round(((cmp_val - or_high) / or_high) * 100, 2)
+                
+                if pct_moved > 0.3:
+                    entry = round(or_high, 2)
+                else:
+                    entry = round(breakout_close, 2)
                     
-                    if pct_moved > 0.3:
-                        entry = round(or_high, 2)
-                    else:
-                        entry = round(breakout_close, 2)
-                        
-                    sl = or_mid
-                    risk = entry - sl
-                    target = round(entry + risk, 2)
-                    qty = max(1, int(1000 / risk)) if risk > 0 else 1
-                    max_loss = 1000
+                sl = or_mid
+                risk = entry - sl
+                target = round(entry + risk, 2)
+                qty = max(1, int(1000 / risk)) if risk > 0 else 1
+                max_loss = 1000
 
-                    vols = [b.get("v", 0) for b in completed_bars]
-                    non_zero_vols = [v for v in vols if v > 0]
-                    b_vol = anchor_breakout_bar.get("v", 0)
-                    if b_vol <= 0 and non_zero_vols:
-                        b_vol = non_zero_vols[-1]
-                    prior_vols = [completed_bars[j]["v"] for j in range(max(0, anchor_idx - 10), anchor_idx) if completed_bars[j].get("v", 0) > 0]
-                    sma_vol = sum(prior_vols) / len(prior_vols) if prior_vols else (sum(non_zero_vols) / len(non_zero_vols) if non_zero_vols else 1.0)
-                    vol_ratio = round(b_vol / sma_vol, 2) if sma_vol > 0 else 1.0
+                vols = [b.get("v", 0) for b in completed_bars]
+                non_zero_vols = [v for v in vols if v > 0]
+                b_vol = anchor_breakout_bar.get("v", 0)
+                if b_vol <= 0 and non_zero_vols:
+                    b_vol = non_zero_vols[-1]
+                prior_vols = [completed_bars[j]["v"] for j in range(max(0, anchor_idx - 10), anchor_idx) if completed_bars[j].get("v", 0) > 0]
+                sma_vol = sum(prior_vols) / len(prior_vols) if prior_vols else (sum(non_zero_vols) / len(non_zero_vols) if non_zero_vols else 1.0)
+                vol_ratio = round(b_vol / sma_vol, 2) if sma_vol > 0 else 1.0
 
-                    rsi_val, macd_hist, prev_hist = calculate_indicators(completed_bars[:anchor_idx+1])
-                    confidence = compute_confidence(side, vol_ratio, rsi_val, macd_hist, prev_hist, completed_bars[:anchor_idx+1], cmp_val)
+                rsi_val, macd_hist, prev_hist = calculate_indicators(completed_bars[:anchor_idx+1])
+                confidence = compute_confidence(side, vol_ratio, rsi_val, macd_hist, prev_hist, completed_bars[:anchor_idx+1], cmp_val)
 
-                elif break_side == "SELL (Short)" and cmp_val <= or_low:
-                    triggered = True
-                    side = "SELL (Short)"
-                    breakout_close = anchor_breakout_bar["c"]
-                    pct_moved = round(((or_low - breakout_close) / or_low) * 100, 2)
+            elif break_side == "SELL (Short)" and cmp_val <= or_low:
+                triggered = True
+                side = "SELL (Short)"
+                breakout_close = anchor_breakout_bar["c"]
+                pct_moved = round(((or_low - breakout_close) / or_low) * 100, 2)
+                
+                if pct_moved > 0.3:
+                    entry = round(or_low, 2)
+                else:
+                    entry = round(breakout_close, 2)
                     
-                    if pct_moved > 0.3:
-                        entry = round(or_low, 2)
-                    else:
-                        entry = round(breakout_close, 2)
-                        
-                    sl = or_mid
-                    risk = sl - entry
-                    target = round(entry - risk, 2)
-                    qty = max(1, int(1000 / risk)) if risk > 0 else 1
-                    max_loss = 1000
+                sl = or_mid
+                risk = sl - entry
+                target = round(entry - risk, 2)
+                qty = max(1, int(1000 / risk)) if risk > 0 else 1
+                max_loss = 1000
 
-                    vols = [b.get("v", 0) for b in completed_bars]
-                    non_zero_vols = [v for v in vols if v > 0]
-                    b_vol = anchor_breakout_bar.get("v", 0)
-                    if b_vol <= 0 and non_zero_vols:
-                        b_vol = non_zero_vols[-1]
-                    prior_vols = [completed_bars[j]["v"] for j in range(max(0, anchor_idx - 10), anchor_idx) if completed_bars[j].get("v", 0) > 0]
-                    sma_vol = sum(prior_vols) / len(prior_vols) if prior_vols else (sum(non_zero_vols) / len(non_zero_vols) if non_zero_vols else 1.0)
-                    vol_ratio = round(b_vol / sma_vol, 2) if sma_vol > 0 else 1.0
+                vols = [b.get("v", 0) for b in completed_bars]
+                non_zero_vols = [v for v in vols if v > 0]
+                b_vol = anchor_breakout_bar.get("v", 0)
+                if b_vol <= 0 and non_zero_vols:
+                    b_vol = non_zero_vols[-1]
+                prior_vols = [completed_bars[j]["v"] for j in range(max(0, anchor_idx - 10), anchor_idx) if completed_bars[j].get("v", 0) > 0]
+                sma_vol = sum(prior_vols) / len(prior_vols) if prior_vols else (sum(non_zero_vols) / len(non_zero_vols) if non_zero_vols else 1.0)
+                vol_ratio = round(b_vol / sma_vol, 2) if sma_vol > 0 else 1.0
 
-                    rsi_val, macd_hist, prev_hist = calculate_indicators(completed_bars[:anchor_idx+1])
-                    confidence = compute_confidence(side, vol_ratio, rsi_val, macd_hist, prev_hist, completed_bars[:anchor_idx+1], cmp_val)
+                rsi_val, macd_hist, prev_hist = calculate_indicators(completed_bars[:anchor_idx+1])
+                confidence = compute_confidence(side, vol_ratio, rsi_val, macd_hist, prev_hist, completed_bars[:anchor_idx+1], cmp_val)
 
-            status = "TRIGGERED" if triggered else "WAITING"
+        status = "TRIGGERED" if triggered else "WAITING"
 
-            results.append({
-                "Symbol": bare_sym,
-                "Sector": sector,
-                "Status": status,
-                "Side": side,
-                "CMP (INR)": round(cmp_val, 2),
-                "% Change": pct_chg,
-                "Entry (INR)": entry,
-                "SL (INR)": sl,
-                "Target (INR)": target,
-                "Qty": qty,
-                "Max Loss (INR)": max_loss,
-                "OR High": round(or_high, 2),
-                "OR Low": round(or_low, 2),
-                "% Moved from OR": pct_moved,
-                "Volume Ratio": vol_ratio if triggered else "-",
-                "Confidence (%)": confidence if triggered else "-"
-            })
-        except Exception:
-            pass
+        return {
+            "Symbol": bare_sym,
+            "Sector": sector,
+            "Status": status,
+            "Side": side,
+            "CMP (INR)": round(cmp_val, 2),
+            "% Change": pct_chg,
+            "Entry (INR)": entry,
+            "SL (INR)": sl,
+            "Target (INR)": target,
+            "Qty": qty,
+            "Max Loss (INR)": max_loss,
+            "OR High": round(or_high, 2),
+            "OR Low": round(or_low, 2),
+            "% Moved from OR": pct_moved,
+            "Volume Ratio": vol_ratio if triggered else "-",
+            "Confidence (%)": confidence if triggered else "-"
+        }
+    except Exception:
+        return None
+
+@st.cache_data(ttl=300)
+def run_market_scan(index_name="NIFTY50", source="auto"):
+    symbols = nse_data.index_constituents(index_name)
+    now = nse_data.now_ist()
+    results = []
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        futures = {executor.submit(process_single_symbol, sym, source, now): sym for sym in symbols}
+        for future in concurrent.futures.as_completed(futures):
+            res = future.result()
+            if res:
+                results.append(res)
 
     return pd.DataFrame(results)
+
+@st.cache_data(ttl=300)
+def run_overall_sector_scan(source="auto"):
+    all_sector_symbols = list(SECTOR_MAP.keys())
+    now = nse_data.now_ist()
+
+    def process_sector_sym(bare_sym):
+        try:
+            sym = nse_data.normalize_symbol(bare_sym)
+            bars = nse_data.load_bars(sym, source=source, days=5)
+            if not bars:
+                return None
+            day_bars = nse_data.day_bars(bars, bars[-1]["t"].date())
+            if not day_bars:
+                return None
+            cmp_val = day_bars[-1]["c"]
+            day_open = day_bars[0]["o"]
+            
+            prev_close = None
+            if source != "dhan":
+                try:
+                    meta = nse_data.yahoo_chart(sym, range_="5d", interval="5m").get("meta", {})
+                    prev_close = meta.get("previousClose") or meta.get("chartPreviousClose")
+                except Exception:
+                    pass
+            if not prev_close:
+                s_map = nse_data.session_map(bars)
+                dates = sorted(s_map.keys())
+                if len(dates) >= 2:
+                    prev_day = dates[-2]
+                    prev_day_bars = [s_map[prev_day][m] for m in sorted(s_map[prev_day])]
+                    prev_close = prev_day_bars[-1]["c"]
+                else:
+                    prev_close = day_open
+
+            pct_chg = round(((cmp_val - prev_close) / prev_close) * 100, 2)
+            sector = SECTOR_MAP.get(bare_sym, "Other")
+            return {"Sector": sector, "% Change": pct_chg}
+        except Exception:
+            return None
+
+    results = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        futures = {executor.submit(process_sector_sym, s): s for s in all_sector_symbols}
+        for future in concurrent.futures.as_completed(futures):
+            res = future.result()
+            if res:
+                results.append(res)
+
+    sec_df = pd.DataFrame(results)
+    if not sec_df.empty:
+        sector_perf = sec_df.groupby("Sector")["% Change"].mean().reset_index()
+        sector_perf.columns = ["Sector", "Avg % Change"]
+        sector_perf = sector_perf.sort_values(by="Avg % Change", ascending=False).reset_index(drop=True)
+        sector_perf["Avg % Change"] = sector_perf["Avg % Change"].round(2)
+        return sector_perf
+    return pd.DataFrame(columns=["Sector", "Avg % Change"])
 
 @st.cache_data(ttl=300)
 def run_fundamental_scan():
@@ -327,7 +395,7 @@ def run_fundamental_scan():
 if app_choice == "Live ORB & Breakdown Dashboard":
     st.title("📈 Nifty Live Opening-Range Breakout & Breakdown Dashboard")
     st.markdown("""
-    This dashboard monitors Indian equity indices for 15-minute Opening-Range breakouts (Long) and breakdowns (Short), backed by **5-minute cached scanning** and an **interactive Sector Strength grid with checkboxes**.
+    This dashboard monitors Indian equity indices for 15-minute Opening-Range breakouts (Long) and breakdowns (Short), backed by **fast parallel scanning** and an **overall Sector Strength leaderboard with interactive checkboxes**.
     """)
 
     index_choice = st.sidebar.selectbox("Select Index / Universe", ["NIFTY50", "BANKNIFTY", "NIFTY100"], index=0)
@@ -338,16 +406,12 @@ if app_choice == "Live ORB & Breakdown Dashboard":
         format_func=lambda x: {"auto": "Auto (Dhan if configured, else Yahoo)", "dhan": "DhanHQ (Exchange Feed)", "yahoo": "Yahoo Finance"}[x]
     )
 
-    with st.spinner(f"Loading market scan & sector rankings for {index_choice} using {data_source.upper()}..."):
+    with st.spinner(f"Loading overall sector performance & market scan for {index_choice} using {data_source.upper()}..."):
         df = run_market_scan(index_choice, source=data_source)
+        sector_df = run_overall_sector_scan(source=data_source)
 
     if not df.empty:
-        sector_df = df.groupby("Sector")["% Change"].mean().reset_index()
-        sector_df.columns = ["Sector", "Avg % Change"]
-        sector_df = sector_df.sort_values(by="Avg % Change", ascending=False).reset_index(drop=True)
-        sector_df["Avg % Change"] = sector_df["Avg % Change"].round(2)
-
-        st.subheader("📊 Sector Strength Leaderboard & Filter")
+        st.subheader("📊 Overall Sector Strength Leaderboard & Filter")
         
         select_all = st.checkbox("Select All Sectors", value=True, key="select_all_sectors")
         sector_df["Select"] = select_all
@@ -430,7 +494,7 @@ if app_choice == "Live ORB & Breakdown Dashboard":
             mime="text/csv"
         )
     else:
-        st.warning("No data retrieved from Yahoo Finance.")
+        st.warning("No data retrieved from market feed.")
 
 else:
     st.title("🔍 Fundamental & Volume Stock Screener")
