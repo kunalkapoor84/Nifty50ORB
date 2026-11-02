@@ -13,11 +13,16 @@ except ImportError:
 # Load Streamlit Cloud secrets into environment variables if available
 try:
     if "DHAN_CLIENT_ID" in st.secrets:
-        os.environ["DHAN_CLIENT_ID"] = st.secrets["DHAN_CLIENT_ID"]
+        os.environ["DHAN_CLIENT_ID"] = str(st.secrets["DHAN_CLIENT_ID"]).strip('"\'')
     if "DHAN_ACCESS_TOKEN" in st.secrets:
-        os.environ["DHAN_ACCESS_TOKEN"] = st.secrets["DHAN_ACCESS_TOKEN"]
+        os.environ["DHAN_ACCESS_TOKEN"] = str(st.secrets["DHAN_ACCESS_TOKEN"]).strip('"\'')
 except Exception:
     pass
+
+if os.environ.get("DHAN_CLIENT_ID"):
+    os.environ["DHAN_CLIENT_ID"] = os.environ["DHAN_CLIENT_ID"].strip('"\'')
+if os.environ.get("DHAN_ACCESS_TOKEN"):
+    os.environ["DHAN_ACCESS_TOKEN"] = os.environ["DHAN_ACCESS_TOKEN"].strip('"\'')
 
 import nse_data
 import screener
