@@ -187,7 +187,17 @@ def run_market_scan(index_name="NIFTY50", source="auto"):
 
             cmp_val = completed_bars[-1]["c"]
             day_open = day_bars[0]["o"]
-            pct_chg = round(((cmp_val - day_open) / day_open) * 100, 2)
+            
+            s_map = nse_data.session_map(bars)
+            dates = sorted(s_map.keys())
+            if len(dates) >= 2:
+                prev_day = dates[-2]
+                prev_day_bars = [s_map[prev_day][m] for m in sorted(s_map[prev_day])]
+                prev_close = prev_day_bars[-1]["c"]
+            else:
+                prev_close = day_open
+
+            pct_chg = round(((cmp_val - prev_close) / prev_close) * 100, 2)
 
             bare_sym = nse_data.bare_symbol(sym)
             sector = SECTOR_MAP.get(bare_sym, "Other")
