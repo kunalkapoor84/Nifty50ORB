@@ -425,8 +425,10 @@ def run_sector_index_scan(source="auto"):
     sec_df = pd.DataFrame(results)
     if not sec_df.empty:
         sec_df = sec_df.drop_duplicates(subset=["Sector"]).sort_values(by="Avg % Change", ascending=False).reset_index(drop=True)
+        if not any(sec_df["Sector"] == "Other"):
+            sec_df = pd.concat([sec_df, pd.DataFrame([{"Sector": "Other", "Avg % Change": 0.0}])], ignore_index=True)
         return sec_df
-    return pd.DataFrame(columns=["Sector", "Avg % Change"])
+    return pd.DataFrame([{"Sector": "Other", "Avg % Change": 0.0}], columns=["Sector", "Avg % Change"])
 
 @st.cache_data(ttl=300)
 def run_market_scan(index_name="NIFTY50", source="auto"):
@@ -434,12 +436,17 @@ def run_market_scan(index_name="NIFTY50", source="auto"):
     now = nse_data.now_ist()
     results = []
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=30) as executor:
-        futures = {executor.submit(process_single_symbol, sym, source, now): sym for sym in symbols}
-        for future in concurrent.futures.as_completed(futures):
-            res = future.result()
-            if res:
-                results.append(res)
+    chunk_size = 25
+    for i in range(0, len(symbols), chunk_size):
+        chunk = symbols[i:i+chunk_size]
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            futures = {executor.submit(process_single_symbol, sym, source, now): sym for sym in chunk}
+            for future in concurrent.futures.as_completed(futures):
+                res = future.result()
+                if res:
+                    results.append(res)
+        if len(symbols) > 50:
+            time.sleep(0.15)
 
     return pd.DataFrame(results)
 
@@ -503,6 +510,9 @@ if app_choice == "Live ORB & Breakdown Dashboard":
         )
 
         selected_sectors = edited_sector_df[edited_sector_df["Select"] == True]["Sector"].tolist()
+        for s in df["Sector"].unique():
+            if s not in selected_sectors and s not in edited_sector_df["Sector"].values:
+                selected_sectors.append(s)
         filtered_df = df[df["Sector"].isin(selected_sectors)]
 
         triggered_df = filtered_df[filtered_df["Status"] == "TRIGGERED"].sort_values(by="Volume Ratio", ascending=False)
