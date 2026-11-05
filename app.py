@@ -400,10 +400,25 @@ def run_sector_index_scan(source="auto"):
             try:
                 bars = nse_data.load_bars(idx_sym, source="yahoo", days=5)
                 if bars and len(bars) >= 2:
-                    cmp_val = bars[-1]['c']
-                    prev_close = bars[-2]['c']
-                    pct_chg = round(((cmp_val - prev_close) / prev_close) * 100, 2)
-                    results.append({"Sector": sec_name, "Avg % Change": pct_chg})
+                    meta = {}
+                    try:
+                        meta = nse_data.yahoo_chart(nse_data.normalize_symbol(idx_sym), range_="5d", interval="5m").get("meta", {})
+                    except Exception:
+                        pass
+                    cmp_val = meta.get("regularMarketPrice") or bars[-1]['c']
+                    prev_close = meta.get("previousClose") or meta.get("chartPreviousClose")
+                    if not prev_close:
+                        s_map = nse_data.session_map(bars)
+                        dates = sorted(s_map.keys())
+                        if len(dates) >= 2:
+                            prev_day = dates[-2]
+                            prev_day_bars = [s_map[prev_day][m] for m in sorted(s_map[prev_day])]
+                            prev_close = prev_day_bars[-1]["c"]
+                        else:
+                            prev_close = bars[0]['o']
+                    if prev_close and prev_close > 0:
+                        pct_chg = round(((cmp_val - prev_close) / prev_close) * 100, 2)
+                        results.append({"Sector": sec_name, "Avg % Change": pct_chg})
             except Exception:
                 pass
 
