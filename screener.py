@@ -22,24 +22,21 @@ def calculate_rsi(series, period=14):
     rsi = 100 - (100 / (1 + rs))
     return rsi
 
-def screen_stocks(symbols=None, max_stocks=30, progress_callback=None):
+def screen_stocks(symbols=None, max_stocks=150, progress_callback=None):
     if symbols is None:
         symbols = DEFAULT_NSE_SYMBOLS
 
+    target_symbols = symbols[:max_stocks]
     results = []
-    total = min(len(symbols), max_stocks)
+    completed_count = [0]
 
-    for i, sym in enumerate(symbols[:max_stocks]):
+    def process_one(sym):
         ticker_str = f"{sym}.NS" if not sym.endswith(".NS") else sym
-        if progress_callback:
-            progress_callback(i + 1, total, sym)
-
         try:
             tk = yf.Ticker(ticker_str)
             hist = tk.history(period="3mo")
             if hist.empty or len(hist) < 25:
-                time.sleep(0.5)
-                continue
+                return None
 
             # Calculate indicators
             hist['RSI'] = calculate_rsi(hist['Close'], 14)
@@ -56,23 +53,32 @@ def screen_stocks(symbols=None, max_stocks=30, progress_callback=None):
             info = tk.info
             pe = info.get('trailingPE') or info.get('forwardPE')
             if pe is None or pe <= 0:
-                time.sleep(0.5)
-                continue
+                return None
 
             # Filters: PE < 20, Volume Spike > 2.0x, RSI > 50
             if pe < 20 and vol_ratio > 2.0 and rsi > 50:
-                results.append({
+                return {
                     "Ticker": sym,
                     "Price (INR)": round(close_price, 2),
                     "P/E Ratio": round(pe, 2),
                     "Volume Ratio": round(vol_ratio, 2),
                     "RSI (14)": round(rsi, 2)
-                })
-
-        except Exception as e:
+                }
+        except Exception:
             pass
+        finally:
+            completed_count[0] += 1
+            if progress_callback:
+                progress_callback(completed_count[0], len(target_symbols), sym)
+        return None
 
-        time.sleep(0.5)  # Rate limiting delay as requested
+    import concurrent.futures
+    with concurrent.futures.ThreadPoolExecutor(max_workers=25) as executor:
+        futures = {executor.submit(process_one, sym): sym for sym in target_symbols}
+        for future in concurrent.futures.as_completed(futures):
+            res = future.result()
+            if res:
+                results.append(res)
 
     df = pd.DataFrame(results)
     if not df.empty:

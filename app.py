@@ -419,7 +419,7 @@ def run_market_scan(index_name="NIFTY50", source="auto"):
     now = nse_data.now_ist()
     results = []
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=15) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=30) as executor:
         futures = {executor.submit(process_single_symbol, sym, source, now): sym for sym in symbols}
         for future in concurrent.futures.as_completed(futures):
             res = future.result()
@@ -434,7 +434,8 @@ def run_fundamental_scan(index_name="NIFTY250"):
         symbols = nse_data.index_constituents(index_name)
     except Exception:
         symbols = None
-    return screener.screen_stocks(symbols=symbols, max_stocks=150)
+    max_len = len(symbols) if symbols else 250
+    return screener.screen_stocks(symbols=symbols, max_stocks=max_len)
 
 if app_choice == "Live ORB & Breakdown Dashboard":
     st.title("📈 Nifty Live Opening-Range Breakout & Breakdown Dashboard")
