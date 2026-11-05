@@ -35,6 +35,10 @@ INDEX_ALIASES = {
     "FINNIFTY": "^CNXFIN",
     "NIFTY FIN SERVICE": "^CNXFIN",
     "MIDCPNIFTY": "^NSEMDCP50",
+    "NIFTY250": "NIFTY_LARGEMID250.NS",
+    "NIFTY 250": "NIFTY_LARGEMID250.NS",
+    "NIFTYLARGEMID250": "NIFTY_LARGEMID250.NS",
+    "NIFTY LARGEMID 250": "NIFTY_LARGEMID250.NS",
     "SENSEX": "^BSESN",
 }
 INDEX_SECURITY_IDS = {
@@ -42,6 +46,8 @@ INDEX_SECURITY_IDS = {
     "BANKNIFTY": ("25", "BANK NIFTY"),
     "FINNIFTY": ("27", "FINNIFTY"),
     "MIDCPNIFTY": ("442", "MIDCPNIFTY"),
+    "NIFTY250": ("6", "NIFTY LARGEMID250"),
+    "NIFTYLARGEMID250": ("6", "NIFTY LARGEMID250"),
     "SENSEX": ("51", "SENSEX"),
 }
 YAHOO_TO_INDEX = {
@@ -49,6 +55,7 @@ YAHOO_TO_INDEX = {
     "^NSEBANK": "BANKNIFTY",
     "^CNXFIN": "FINNIFTY",
     "^NSEMDCP50": "MIDCPNIFTY",
+    "NIFTY_LARGEMID250.NS": "NIFTY250",
     "^BSESN": "SENSEX",
 }
 
@@ -67,6 +74,8 @@ INDEX_CSV = {
     "NIFTY50": "https://archives.nseindia.com/content/indices/ind_nifty50list.csv",
     "BANKNIFTY": "https://archives.nseindia.com/content/indices/ind_niftybanklist.csv",
     "NIFTY100": "https://archives.nseindia.com/content/indices/ind_nifty100list.csv",
+    "NIFTY250": "https://archives.nseindia.com/content/indices/ind_niftylargemidcap250list.csv",
+    "NIFTYLARGEMID250": "https://archives.nseindia.com/content/indices/ind_niftylargemidcap250list.csv",
 }
 DHAN_MASTER_URL = "https://images.dhan.co/api-data/api-scrip-master.csv"
 
@@ -179,6 +188,10 @@ def index_constituents(name):
         key = "NIFTY50"
     if key == "BANKNIFTY":
         key = "BANKNIFTY"
+    if key in ("NIFTY100", "NIFTY_100"):
+        key = "NIFTY100"
+    if key in ("NIFTY250", "NIFTY_250", "NIFTYLARGEMID250", "NIFTY250LARGEMIDCAP", "NIFTYLARGEMIDCAP250"):
+        key = "NIFTY250"
     url = INDEX_CSV.get(key)
     if url:
         try:
@@ -195,7 +208,7 @@ def index_constituents(name):
             raise DataError("could not fetch the %s constituent list from NSE" % key)
     if key == "NIFTY50":
         return list(NIFTY50_FALLBACK)
-    raise DataError("unknown index list %r (try NIFTY50 or BANKNIFTY)" % name)
+    raise DataError("unknown index list %r (try NIFTY50, BANKNIFTY, NIFTY100, NIFTY250)" % name)
 
 
 def _parse_yahoo_doc(doc, sym, want_meta=False):

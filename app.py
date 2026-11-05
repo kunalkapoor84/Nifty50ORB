@@ -3,6 +3,7 @@ import pandas as pd
 import time
 import os
 import concurrent.futures
+from datetime import timedelta
 
 try:
     from dotenv import load_dotenv
@@ -76,23 +77,6 @@ SECTOR_MAP = {
     "LT": "Industrials & Infra", "ULTRACEMCO": "Cement & Materials", "GRASIM": "Cement & Materials",
     "ADANIENT": "Diversified / Infra", "ADANIPORTS": "Infrastructure", "TRENT": "Consumer & Retail",
     "TITAN": "Consumer & Retail", "INDIGO": "Aviation & Services", "MAXHEALTH": "Healthcare", "BSE": "Financial Services"
-}
-
-SECTOR_INDICES = {
-    "IT": "^CNXIT",
-    "Banking & Financials": "^NSEBANK",
-    "Energy & Oil/Gas": "^CNXENERGY",
-    "Auto": "^CNXAUTO",
-    "FMCG": "^CNXFMCG",
-    "Metals": "^CNXMETAL",
-    "Pharma": "^CNXPHARMA",
-    "Industrials & Infra": "^CNXINFRA",
-    "Cement & Materials": "^CNXCMDT",
-    "Consumer & Retail": "^CNXCONSM",
-    "Infrastructure": "^CNXINFRA",
-    "Financial Services": "^CNXFIN",
-    "Healthcare": "^CNXPHARMA",
-    "Other": "^NSEI"
 }
 
 def calculate_indicators(bars):
@@ -340,47 +324,88 @@ def process_single_symbol(sym, source, now):
 
 @st.cache_data(ttl=300)
 def run_sector_index_scan(source="auto"):
-    def process_sector_index(item):
-        sector_name, index_sym = item
-        try:
-            bars = nse_data.load_bars(index_sym, source=source, days=5)
-            if not bars:
-                return None
-            day_bars = nse_data.day_bars(bars, bars[-1]["t"].date())
-            if not day_bars:
-                return None
-            cmp_val = day_bars[-1]["c"]
-            
-            meta = {}
-            if source != "dhan":
-                try:
-                    meta = nse_data.yahoo_chart(index_sym, range_="5d", interval="5m").get("meta", {})
-                except Exception:
-                    pass
-            
-            prev_close = meta.get("previousClose") or meta.get("chartPreviousClose")
-            if not prev_close:
-                s_map = nse_data.session_map(bars)
-                dates = sorted(s_map.keys())
-                if len(dates) >= 2:
-                    prev_day = dates[-2]
-                    prev_day_bars = [s_map[prev_day][m] for m in sorted(s_map[prev_day])]
-                    prev_close = prev_day_bars[-1]["c"]
-                else:
-                    prev_close = day_bars[0]["o"]
-
-            pct_chg = round(((cmp_val - prev_close) / prev_close) * 100, 2)
-            return {"Sector": sector_name, "Avg % Change": pct_chg}
-        except Exception:
-            return None
-
+    use_dhan = (source in ("auto", "dhan")) and nse_data.dhan_ready()
     results = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-        futures = {executor.submit(process_sector_index, item): item for item in SECTOR_INDICES.items()}
-        for future in concurrent.futures.as_completed(futures):
-            res = future.result()
-            if res:
-                results.append(res)
+
+    sector_name_map = {
+        "NIFTY OIL AND GAS": "Energy & Oil/Gas",
+        "NIFTY INFRA": "Infrastructure",
+        "NIFTY METAL": "Metals",
+        "NIFTY CONSUMER DURABLE": "Consumer & Retail",
+        "NIFTY AUTO": "Auto",
+        "NIFTY REALTY": "Cement & Materials",
+        "NIFTY FMCG": "FMCG",
+        "NIFTY BANK": "Banking & Financials",
+        "NIFTY PHARMA": "Pharma",
+        "NIFTY IT": "IT",
+        "NIFTY ENERGY": "Energy & Oil/Gas"
+    }
+
+    if use_dhan:
+        try:
+            dhan = nse_data.get_dhan()
+            rows = nse_data.load_dhan_master()
+            indices = [r for r in rows if r.get('SEM_INSTRUMENT_NAME') == 'INDEX' and r.get('SEM_SMST_SECURITY_ID')]
+            sec_map = {int(r['SEM_SMST_SECURITY_ID']): r for r in indices}
+            ids = list(sec_map.keys())
+            
+            today_date = nse_data.now_ist().strftime('%Y-%m-%d')
+            past_date = (nse_data.now_ist() - timedelta(days=7)).strftime('%Y-%m-%d')
+
+            for i in range(0, len(ids), 25):
+                chunk = ids[i:i+25]
+                resp = dhan.ohlc_data({'IDX_I': chunk})
+                if resp.get('status') == 'success':
+                    data = resp.get('data', {}).get('IDX_I', {})
+                    for sid_str, q in data.items():
+                        r = sec_map.get(int(sid_str))
+                        if r and q:
+                            name = (r.get('SEM_CUSTOM_SYMBOL') or r.get('SEM_TRADING_SYMBOL') or '').strip().upper()
+                            for k, mapped_sec in sector_name_map.items():
+                                if k in name:
+                                    ltp = float(q.get('last_price') or 0)
+                                    try:
+                                        hist = dhan.historical_daily_data(
+                                            security_id=sid_str,
+                                            exchange_segment='IDX_I',
+                                            instrument_type='INDEX',
+                                            expiry_code=0,
+                                            from_date=past_date,
+                                            to_date=today_date
+                                        )
+                                        if hist.get('status') == 'success':
+                                            closes = hist.get('data', {}).get('close', [])
+                                            if closes:
+                                                prev_close = closes[-1]
+                                                if ltp > 0 and prev_close > 0:
+                                                    chg_pct = round(((ltp - prev_close) / prev_close) * 100, 2)
+                                                    results.append({"Sector": mapped_sec, "Avg % Change": chg_pct})
+                                    except Exception:
+                                        pass
+        except Exception:
+            pass
+
+    if not results:
+        yahoo_indices = {
+            "Energy & Oil/Gas": "^CNXENERGY",
+            "Infrastructure": "^CNXINFRA",
+            "Metals": "^CNXMETAL",
+            "Auto": "^CNXAUTO",
+            "FMCG": "^CNXFMCG",
+            "Banking & Financials": "^NSEBANK",
+            "Pharma": "^CNXPHARMA",
+            "IT": "^CNXIT"
+        }
+        for sec_name, idx_sym in yahoo_indices.items():
+            try:
+                bars = nse_data.load_bars(idx_sym, source="yahoo", days=5)
+                if bars and len(bars) >= 2:
+                    cmp_val = bars[-1]['c']
+                    prev_close = bars[-2]['c']
+                    pct_chg = round(((cmp_val - prev_close) / prev_close) * 100, 2)
+                    results.append({"Sector": sec_name, "Avg % Change": pct_chg})
+            except Exception:
+                pass
 
     sec_df = pd.DataFrame(results)
     if not sec_df.empty:
@@ -404,8 +429,12 @@ def run_market_scan(index_name="NIFTY50", source="auto"):
     return pd.DataFrame(results)
 
 @st.cache_data(ttl=300)
-def run_fundamental_scan():
-    return screener.screen_stocks(max_stocks=50)
+def run_fundamental_scan(index_name="NIFTY250"):
+    try:
+        symbols = nse_data.index_constituents(index_name)
+    except Exception:
+        symbols = None
+    return screener.screen_stocks(symbols=symbols, max_stocks=150)
 
 if app_choice == "Live ORB & Breakdown Dashboard":
     st.title("📈 Nifty Live Opening-Range Breakout & Breakdown Dashboard")
@@ -413,7 +442,17 @@ if app_choice == "Live ORB & Breakdown Dashboard":
     This dashboard monitors Indian equity indices for 15-minute Opening-Range breakouts (Long) and breakdowns (Short), backed by **fast parallel scanning** and an **official Sector Index Strength leaderboard with interactive checkboxes**.
     """)
 
-    index_choice = st.sidebar.selectbox("Select Index / Universe", ["NIFTY50", "BANKNIFTY", "NIFTY100"], index=0)
+    index_choice = st.sidebar.selectbox(
+        "Select Index / Universe",
+        ["NIFTY50", "BANKNIFTY", "NIFTY100", "NIFTY250"],
+        index=0,
+        format_func=lambda x: {
+            "NIFTY50": "Nifty 50",
+            "BANKNIFTY": "Nifty Bank",
+            "NIFTY100": "Nifty 100",
+            "NIFTY250": "Nifty 250 Large & Midcap"
+        }.get(x, x)
+    )
     data_source = st.sidebar.selectbox(
         "Data Source",
         ["auto", "dhan", "yahoo"],
@@ -529,8 +568,19 @@ else:
     - **RSI (14)** > 50
     """)
 
-    with st.spinner("Running fundamental and technical volume screen..."):
-        fund_df = run_fundamental_scan()
+    screener_universe = st.selectbox(
+        "Select Screener Universe",
+        ["NIFTY250", "NIFTY100", "NIFTY50"],
+        index=0,
+        format_func=lambda x: {
+            "NIFTY50": "Nifty 50",
+            "NIFTY100": "Nifty 100",
+            "NIFTY250": "Nifty 250 Large & Midcap"
+        }.get(x, x)
+    )
+
+    with st.spinner(f"Running fundamental and technical volume screen for {screener_universe}..."):
+        fund_df = run_fundamental_scan(screener_universe)
 
     if not fund_df.empty:
         st.success(f"Found {len(fund_df)} stocks matching criteria!")
